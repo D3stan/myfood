@@ -1,0 +1,30 @@
+import { defineConfig } from 'vitest/config';
+import { VitePWA } from 'vite-plugin-pwa';
+
+export default defineConfig({
+  root: 'src/web',
+  build: { outDir: '../../dist/web', emptyOutDir: true },
+  server: { proxy: { '/api': 'http://127.0.0.1:3000' } },
+  test: { root: '.', include: ['tests/**/*.test.ts'] },
+  plugins: [
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['apple-touch-icon.png', 'favicon.svg'],
+      workbox: { globPatterns: ['**/*.{js,css,html,woff2,png,svg}'], navigateFallbackDenylist: [/^\/api\//] },
+      manifest: {
+        name: 'MyFood',
+        short_name: 'MyFood',
+        description: 'Shared pantry',
+        display: 'standalone',
+        start_url: '/',
+        background_color: '#ece2c6',
+        theme_color: '#ece2c6',
+        icons: [
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+    }),
+  ],
+});
