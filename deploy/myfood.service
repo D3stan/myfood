@@ -9,6 +9,7 @@ User=pantry
 Group=pantry
 WorkingDirectory=/opt/myfood
 EnvironmentFile=/etc/myfood.env
+EnvironmentFile=-/etc/myfood-mcp.env
 ExecStart=/usr/bin/node src/server/main.ts
 Restart=always
 RestartSec=3
