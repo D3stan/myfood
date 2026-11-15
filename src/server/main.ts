@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { serve } from '@hono/node-server';
 import { runAi } from './ai/agy.ts';
 import { openDb } from './db.ts';
+import { guestCode } from './guest.ts';
 import { checkExpiryPushes, ensureVapidKeys } from './push.ts';
 import { createApp } from './routes.ts';
 
@@ -33,7 +34,7 @@ const app = createApp({
   insecureCookies: process.env.INSECURE_COOKIES === '1',
   mcpSecret: process.env.MCP_SECRET,
 });
-serve({ fetch: app.fetch, port, hostname: host }, i => console.log(`MyFood ${build} on http://${host}:${i.port}`));
+serve({ fetch: app.fetch, port, hostname: host }, i => console.log(`MyFood ${build} on http://${host}:${i.port} (guest code: ${guestCode(db)})`));
 
 // Check expiry notifications every 15 minutes during the morning window (08:00-09:59 local time).
 setInterval(() => {

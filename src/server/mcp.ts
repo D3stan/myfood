@@ -62,6 +62,7 @@ interface ItemRowFull {
   shelf_life_days: number | null;
   kcal_per_unit: number | null;
   protein_per_unit: number | null;
+  fat_per_unit: number | null;
   archived_at: number | null;
   created_at: number;
 }
@@ -96,6 +97,7 @@ interface EventLineRow {
   expires_at: string | null;
   kcal: number | null;
   protein_g: number | null;
+  fat_g: number | null;
 }
 
 const READ_ANNOTATIONS: ToolAnnotations = {
@@ -234,6 +236,7 @@ function toHydratedItem(
     shelf_life_days: row.shelf_life_days,
     kcal_per_unit: row.kcal_per_unit,
     protein_per_unit: row.protein_per_unit,
+    fat_per_unit: row.fat_per_unit,
   };
   if (recipe) item.recipe = recipe;
   if (includeArchived) item.archived_at = row.archived_at;
@@ -248,7 +251,7 @@ function loadHydratedItems(db: Db, nowMs: number, includeArchived = false): Hydr
     db,
     `SELECT id, name, name_key, emoji, category, unit, step, pack_size, low_at,
             owner_id, is_cooked, portion_g, expires_at, shelf_life_days,
-            kcal_per_unit, protein_per_unit, archived_at, created_at
+            kcal_per_unit, protein_per_unit, fat_per_unit, archived_at, created_at
      FROM items ${where}`,
   )
     .map(r => toHydratedItem(r, stockMap, recipes, nowMs, includeArchived))
@@ -261,7 +264,7 @@ function getHydratedItemById(db: Db, itemId: number, nowMs: number, includeArchi
     db,
     `SELECT id, name, name_key, emoji, category, unit, step, pack_size, low_at,
             owner_id, is_cooked, portion_g, expires_at, shelf_life_days,
-            kcal_per_unit, protein_per_unit, archived_at, created_at
+            kcal_per_unit, protein_per_unit, fat_per_unit, archived_at, created_at
      FROM items WHERE ${where}`,
     itemId,
   );
@@ -283,7 +286,7 @@ function requireActiveItems(db: Db, itemIds: number[]): void {
 function hydrateEventLines(db: Db, cid: string) {
   return all<EventLineRow>(
     db,
-    'SELECT item_id, qty, is_set, cost_cents, expires_at, kcal, protein_g FROM event_lines WHERE event_cid = ? ORDER BY rowid',
+    'SELECT item_id, qty, is_set, cost_cents, expires_at, kcal, protein_g, fat_g FROM event_lines WHERE event_cid = ? ORDER BY rowid',
     cid,
   ).map(l => ({
     item_id: l.item_id,
@@ -293,6 +296,7 @@ function hydrateEventLines(db: Db, cid: string) {
     ...(l.expires_at !== null ? { expires_at: l.expires_at } : {}),
     ...(l.kcal !== null ? { kcal: l.kcal } : {}),
     ...(l.protein_g !== null ? { protein_g: l.protein_g } : {}),
+    ...(l.fat_g !== null ? { fat_g: l.fat_g } : {}),
   }));
 }
 
@@ -873,7 +877,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     'get_daily_nutrition',
     {
       title: 'Get Daily Nutrition',
-      description: 'Aggregate daily eaten kcal and protein_g totals (excluding raw cooking ingredient consumption) over the past N days.',
+      description: 'Aggregate daily eaten kcal, protein_g and fat_g totals (excluding raw cooking ingredient consumption) over the past N days.',
       inputSchema: {
         days: z.number().int().min(1).max(365).optional().describe('Lookback window in days (default 14, max 365)'),
         user_id: z.number().int().positive().optional().describe('Optional user ID filter'),
@@ -895,11 +899,13 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         is_set: number;
         kcal: number | null;
         protein_g: number | null;
+        fat_g: number | null;
         kcal_per_unit: number | null;
         protein_per_unit: number | null;
+        fat_per_unit: number | null;
       }>(
         db,
-        `SELECT e.at, e.user_id, l.item_id, l.qty, l.is_set, l.kcal, l.protein_g, i.kcal_per_unit, i.protein_per_unit
+        `SELECT e.at, e.user_id, l.item_id, l.qty, l.is_set, l.kcal, l.protein_g, l.fat_g, i.kcal_per_unit, i.protein_per_unit, i.fat_per_unit
          FROM event_lines l
          JOIN events e ON e.cid = l.event_cid
          JOIN items i ON i.id = l.item_id
@@ -912,16 +918,17 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       for (const r of rows) {
         if (r.is_set) continue;
         const n = eventLineNutrition(
-          { item_id: r.item_id, qty: r.qty, is_set: false, kcal: r.kcal, protein_g: r.protein_g },
-          { kcal_per_unit: r.kcal_per_unit, protein_per_unit: r.protein_per_unit },
+          { item_id: r.item_id, qty: r.qty, is_set: false, kcal: r.kcal, protein_g: r.protein_g, fat_g: r.fat_g },
+          { kcal_per_unit: r.kcal_per_unit, protein_per_unit: r.protein_per_unit, fat_per_unit: r.fat_per_unit },
         );
-        if (n.kcal <= 0 && n.protein_g <= 0) continue;
+        if (n.kcal <= 0 && n.protein_g <= 0 && n.fat_g <= 0) continue;
         const day = isoDate(r.at);
         const key = `${day}:${r.user_id}`;
         const cur = dailyMap.get(key);
         if (cur) {
           cur.kcal = Math.round(cur.kcal + n.kcal);
           cur.protein_g = round1(cur.protein_g + n.protein_g);
+          cur.fat_g = round1(cur.fat_g + n.fat_g);
         } else {
           dailyMap.set(key, {
             day,
@@ -929,6 +936,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
             user_name: users.get(r.user_id),
             kcal: Math.round(n.kcal),
             protein_g: round1(n.protein_g),
+            fat_g: round1(n.fat_g),
           });
         }
       }
@@ -987,6 +995,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         shelf_life_days: ItemBody.shape.shelf_life_days.describe('Default shelf life in days on buy'),
         kcal_per_unit: ItemBody.shape.kcal_per_unit.describe('Calories per 1 unit'),
         protein_per_unit: ItemBody.shape.protein_per_unit.describe('Protein (g) per 1 unit'),
+        fat_per_unit: ItemBody.shape.fat_per_unit.describe('Fat (g) per 1 unit'),
         barcode: ItemBody.shape.barcode.describe('Optional 6-14 digit barcode to link'),
       },
       annotations: WRITE_ANNOTATIONS,
@@ -1034,6 +1043,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         shelf_life_days: ItemPatch.shape.shelf_life_days.describe('Updated shelf_life_days'),
         kcal_per_unit: ItemPatch.shape.kcal_per_unit.describe('Updated kcal_per_unit'),
         protein_per_unit: ItemPatch.shape.protein_per_unit.describe('Updated protein_per_unit'),
+        fat_per_unit: ItemPatch.shape.fat_per_unit.describe('Updated fat_per_unit'),
         barcode: ItemPatch.shape.barcode.describe('Optional 6-14 digit barcode to link'),
       },
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -1174,8 +1184,9 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         total_g: CookBody.shape.total_g.describe('Total cooked weight in grams'),
         expires_at: CookBody.shape.expires_at.describe('Explicit expiry date YYYY-MM-DD'),
         expires_in_days: z.number().int().min(0).max(60).optional().describe('Shelf life in days from today when expires_at is omitted (default 4)'),
-        kcal_total: CookBody.shape.kcal_total.describe('Optional total kcal override (defaults to sum of ingredients)'),
-        protein_total: CookBody.shape.protein_total.describe('Optional total protein (g) override (defaults to sum of ingredients)'),
+        kcal_total: CookBody.shape.kcal_total.describe('Fallback total kcal, used only when no ingredient has calorie data (otherwise summed from ingredients)'),
+        protein_total: CookBody.shape.protein_total.describe('Fallback total protein (g), used only when no ingredient has protein data (otherwise summed from ingredients)'),
+        fat_total: CookBody.shape.fat_total.describe('Fallback total fat (g), used only when no ingredient has fat data (otherwise summed from ingredients)'),
         ingredients: z.array(CookIngredientIn).max(30).optional().describe('Raw ingredients consumed (defaults to [])'),
         at: z.number().int().positive().optional().describe('Optional unix ms timestamp (default now)'),
         cid: CookBody.shape.cid.optional().describe('Optional idempotency batch cid'),
@@ -1203,6 +1214,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         expires_at: expiresAt,
         kcal_total: args.kcal_total ?? null,
         protein_total: args.protein_total ?? null,
+        fat_total: args.fat_total ?? null,
         ingredients: args.ingredients ?? [],
       });
       const res = d.applyCookBatch(db, uid, body, {

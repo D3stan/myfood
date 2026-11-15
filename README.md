@@ -96,3 +96,25 @@ For local stdio clients (e.g. Claude Desktop, Claude Code, or Cursor running aga
   }
 }
 ```
+
+## Guest view
+
+`/guest` shows the shared pantry (read-only, personal items hidden) to anyone with the guest passcode.
+
+Get the passcode: **Me tab, Guest access** (Copy / New code). On the server it is also printed at start-up, or read it with:
+
+```sh
+journalctl -u myfood | grep -i "guest code" | tail -1
+```
+
+A new code logs every guest out. Wrong tries are throttled (5 a minute).
+
+## Siri Shortcuts
+
+Two shortcuts (AI logging, and picking a meal to log). Plan, requests and setup: [docs/siri.md](docs/siri.md).
+Me tab, Siri Shortcut card, has a **Copy setup text** button for each: paste it into Shortcuts' AI builder.
+
+## Nutrition
+
+Items carry kcal, protein and fat per unit. A cooked meal's totals are always summed from its ingredients;
+typed totals only apply to a macro none of the ingredients have data for.

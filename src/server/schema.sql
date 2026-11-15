@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS items (
   shelf_life_days INTEGER,
   kcal_per_unit REAL,
   protein_per_unit REAL,
+  fat_per_unit REAL,
   archived_at INTEGER,
   created_at INTEGER NOT NULL
 );
@@ -72,7 +73,8 @@ CREATE TABLE IF NOT EXISTS event_lines (
   cost_cents INTEGER,
   expires_at TEXT,
   kcal REAL,
-  protein_g REAL
+  protein_g REAL,
+  fat_g REAL
 );
 CREATE INDEX IF NOT EXISTS event_lines_event ON event_lines(event_cid);
 
@@ -154,6 +156,7 @@ CREATE TABLE IF NOT EXISTS barcodes (
   pack_size REAL,
   kcal_per_unit REAL,
   protein_per_unit REAL,
+  fat_per_unit REAL,
   source TEXT NOT NULL,
   raw_json TEXT,
   updated_at INTEGER NOT NULL

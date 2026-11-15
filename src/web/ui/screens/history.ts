@@ -26,15 +26,16 @@ export function groupByDay(events: FoodEvent[], now = new Date()): { day: string
 
 export function history({ st, ui }: V) {
   const daily = computeDailyNutrition(st.events, st.items, st.daily_nutrition);
-  const dayMacros = (day: string): { kcal: number; protein_g: number } => {
-    let kcal = 0, protein_g = 0;
+  const dayMacros = (day: string): { kcal: number; protein_g: number; fat_g: number } => {
+    let kcal = 0, protein_g = 0, fat_g = 0;
     for (const d of daily) {
       if (d.day !== day) continue;
       if (ui.historyScope === 'me' && d.user_id !== st.me.id) continue;
       kcal += d.kcal;
       protein_g += d.protein_g;
+      fat_g += d.fat_g ?? 0;
     }
-    return { kcal: Math.round(kcal), protein_g: Math.round(protein_g * 10) / 10 };
+    return { kcal: Math.round(kcal), protein_g: Math.round(protein_g * 10) / 10, fat_g: Math.round(fat_g * 10) / 10 };
   };
 
   return html`
@@ -51,8 +52,8 @@ export function history({ st, ui }: V) {
       return html`
         <div class="day row" style="align-items:center;gap:8px;flex-wrap:wrap">
           <span>${g.label}</span>
-          ${m.kcal > 0 || m.protein_g > 0
-            ? html`<span class="macro-pill right">${m.kcal.toLocaleString()} kcal · ${fmtNum(m.protein_g)}g P</span>`
+          ${m.kcal > 0 || m.protein_g > 0 || m.fat_g > 0
+            ? html`<span class="macro-pill right">${m.kcal.toLocaleString()} kcal · ${fmtNum(m.protein_g)}g P · ${fmtNum(m.fat_g)}g F</span>`
             : ''}
         </div>
         ${g.events.map(e => html`

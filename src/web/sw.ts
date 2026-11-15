@@ -38,7 +38,7 @@ cleanupOutdatedCaches();
 void sw.skipWaiting();
 clientsClaim();
 
-registerRoute(new NavigationRoute(createHandlerBoundToURL('/index.html'), { denylist: [/^\/api\//] }));
+registerRoute(new NavigationRoute(createHandlerBoundToURL('/index.html'), { denylist: [/^\/api\//, /^\/guest/, /^\/mcp/] }));
 
 sw.addEventListener('message', ev => {
   if (ev.data?.type === 'SKIP_WAITING') void sw.skipWaiting();

@@ -18,6 +18,7 @@ import { cookBatchMacros } from './components/cook.ts';
 import { itemToFields, macroBasis } from './components/sheets.ts';
 import { render } from './render.ts';
 import { shoppingText } from './screens/pantry.ts';
+import { shortcutText } from './screens/shortcuts.ts';
 
 export const hooks: { state?: () => void } = {};
 
@@ -271,7 +272,7 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     stopScanner(s);
     openSheet(s, { t: 'itemForm', q: {} }, {
       name: '', emoji: '🥫', category: 'pantry', unit: 'pc', step: '1', pack: '1',
-      low: '', start: '', itemOwner: 'shared', itemExpiry: '', itemKcal: '', itemProtein: '',
+      low: '', start: '', itemOwner: 'shared', itemExpiry: '', itemKcal: '', itemProtein: '', itemFat: '',
     });
   },
   openAudit: () => {
@@ -363,10 +364,10 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     const sh = sheet(), f = s.ui.f, isNew = sh.t === 'itemForm';
     const step = parseNum(f.step ?? ''), pack = parseNum(f.pack ?? '');
     const low = parseOptNum(f.low), start = (f.start ?? '').trim() ? parseNum(f.start!) : 0;
-    const kcalIn = parseOptNum(f.itemKcal), proteinIn = parseOptNum(f.itemProtein);
+    const kcalIn = parseOptNum(f.itemKcal), proteinIn = parseOptNum(f.itemProtein), fatIn = parseOptNum(f.itemFat);
     const exp = (f.itemExpiry ?? '').trim();
     if (!f.name?.trim() || !(step > 0) || !(pack > 0) || low === 'invalid' || Number.isNaN(start)
-      || kcalIn === 'invalid' || proteinIn === 'invalid' || (exp && !ISO_DATE_RE.test(exp))) {
+      || kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || (exp && !ISO_DATE_RE.test(exp))) {
       return void toast('Check the name and the numbers');
     }
     const name = f.name.trim();
@@ -380,6 +381,7 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
       expires_at: exp || null,
       kcal_per_unit: kcalIn == null ? null : Math.round((kcalIn / mult) * 1000) / 1000,
       protein_per_unit: proteinIn == null ? null : Math.round((proteinIn / mult) * 1000) / 1000,
+      fat_per_unit: fatIn == null ? null : Math.round((fatIn / mult) * 1000) / 1000,
     };
     if (!(await mutate(isNew ? 'POST' : 'PATCH', isNew ? '/api/items' : `/api/items/${sh.id}`, body))) return;
     const made = isNew && start > 0 ? findCreatedItem(st().items, name, body.owner_id) : undefined;
@@ -456,8 +458,8 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     if (portions == null && total_g == null) return void toast('Enter portions, total grams, or both');
     const exp = (f.cookExpiry ?? '').trim();
     if (exp && !ISO_DATE_RE.test(exp)) return void toast('Check expiry date');
-    const kcalIn = parseOptNum(f.cookKcal), proteinIn = parseOptNum(f.cookProtein);
-    if (kcalIn === 'invalid' || proteinIn === 'invalid') return void toast('Check calories and protein');
+    const kcalIn = parseOptNum(f.cookKcal), proteinIn = parseOptNum(f.cookProtein), fatIn = parseOptNum(f.cookFat);
+    if (kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid') return void toast('Check calories, protein and fat');
     const ids = sh.lines ?? [];
     const auto = cookBatchMacros(st().items, ids, sh.q);
     const ingredients = ids.map(id => ({ item_id: id, qty: qOf(sh, String(id)) })).filter(l => l.qty > 0);
@@ -476,6 +478,7 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
         expires_at: exp || null,
         kcal_total: kcalIn != null ? kcalIn : (auto.hasKcal ? auto.kcal : null),
         protein_total: proteinIn != null ? proteinIn : (auto.hasProtein ? auto.protein : null),
+        fat_total: fatIn != null ? fatIn : (auto.hasFat ? auto.fat : null),
         ingredients,
       });
       receive(s, next);
@@ -512,9 +515,9 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     if (!navigator.onLine) return void toast("You're offline");
     const name = (f.bcName ?? '').trim();
     const pack = parseNum(f.bcPack ?? '');
-    const kcalIn = parseOptNum(f.bcKcal), proteinIn = parseOptNum(f.bcProtein);
+    const kcalIn = parseOptNum(f.bcKcal), proteinIn = parseOptNum(f.bcProtein), fatIn = parseOptNum(f.bcFat);
     const cost_cents = parseOptCostCents(f.buyCost);
-    if (!name || !(pack > 0) || kcalIn === 'invalid' || proteinIn === 'invalid' || cost_cents === 'invalid') {
+    if (!name || !(pack > 0) || kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || cost_cents === 'invalid') {
       return void toast('Check the name, pack size, and numbers');
     }
     const unit = (UNITS.includes(f.bcUnit as Unit) ? f.bcUnit : 'g') as Unit;
@@ -526,6 +529,7 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
       pack_size: pack, low_at: null,
       kcal_per_unit: kcalIn == null ? null : Math.round((kcalIn / mult) * 1000) / 1000,
       protein_per_unit: proteinIn == null ? null : Math.round((proteinIn / mult) * 1000) / 1000,
+      fat_per_unit: fatIn == null ? null : Math.round((fatIn / mult) * 1000) / 1000,
       ...(lk?.code ? { barcode: lk.code } : {}),
     };
     if (!(await mutate('POST', '/api/items', body))) return;
@@ -784,6 +788,21 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
       toast('Token revoked');
       afterState();
     } catch (e) { fail(e); }
+  },
+  copyShortcut: async el => {
+    const kind = el.dataset.k === 'log' ? 'log' : 'ai';
+    try {
+      await navigator.clipboard.writeText(shortcutText(kind, location.origin, s.ui.newToken));
+      toast(s.ui.newToken ? 'Setup text copied (with your token)' : 'Setup text copied — add your token where it says');
+    } catch { toast('Copy failed — open "Show the steps" and copy manually'); }
+  },
+  newGuestCode: async () => {
+    if (confirm('Make a new guest passcode? Current guests will be locked out.')) await mutate('POST', '/api/guest/code');
+  },
+  copyGuest: async () => {
+    const code = st().guest_code;
+    try { await navigator.clipboard.writeText(`${location.origin}/guest  passcode: ${code}`); toast('Guest link and passcode copied'); }
+    catch { toast('Copy failed — select and copy manually'); }
   },
   logout: async () => { await api('POST', '/api/logout').catch(() => {}); signedOut(); },
   login: async () => {

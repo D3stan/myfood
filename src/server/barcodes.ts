@@ -93,20 +93,26 @@ export const defaultBarcodeLookup: BarcodeLookupFn = async (code: string): Promi
   const nut = (p.nutriments && typeof p.nutriments === 'object' ? p.nutriments : {}) as Record<string, unknown>;
   const kcal100 = num(nut['energy-kcal_100g']) ?? (num(nut.energy_100g) != null ? num(nut.energy_100g)! / 4.184 : null);
   const prot100 = num(nut.proteins_100g);
+  const fat100 = num(nut.fat_100g);
   const kcalServing = num(nut['energy-kcal_serving']);
   const protServing = num(nut.proteins_serving);
+  const fatServing = num(nut.fat_serving);
   const servingQty = num(p.serving_quantity);
 
   let kcal_per_unit: number | null = null;
   let protein_per_unit: number | null = null;
+  let fat_per_unit: number | null = null;
   if (unit === 'g' || unit === 'ml') {
     if (kcal100 != null) kcal_per_unit = round4(kcal100 / 100);
     if (prot100 != null) protein_per_unit = round4(prot100 / 100);
+    if (fat100 != null) fat_per_unit = round4(fat100 / 100);
   } else {
     if (kcalServing != null) kcal_per_unit = round3(kcalServing);
     else if (kcal100 != null && servingQty && servingQty > 0) kcal_per_unit = round3((kcal100 * servingQty) / 100);
     if (protServing != null) protein_per_unit = round3(protServing);
     else if (prot100 != null && servingQty && servingQty > 0) protein_per_unit = round3((prot100 * servingQty) / 100);
+    if (fatServing != null) fat_per_unit = round3(fatServing);
+    else if (fat100 != null && servingQty && servingQty > 0) fat_per_unit = round3((fat100 * servingQty) / 100);
   }
 
   return {
@@ -117,6 +123,7 @@ export const defaultBarcodeLookup: BarcodeLookupFn = async (code: string): Promi
     pack_size,
     kcal_per_unit,
     protein_per_unit,
+    fat_per_unit,
     category: inferCategory(p.categories_tags),
     source: 'openfoodfacts',
   };
@@ -155,6 +162,7 @@ interface CachedBarcodeRow {
   pack_size: number | null;
   kcal_per_unit: number | null;
   protein_per_unit: number | null;
+  fat_per_unit: number | null;
   source: 'manual' | 'openfoodfacts';
   raw_json: string | null;
 }
@@ -170,7 +178,7 @@ export async function resolveBarcode(
 
   const cached = get<CachedBarcodeRow>(
     db,
-    'SELECT code, item_id, product_name, brand, unit, pack_size, kcal_per_unit, protein_per_unit, source, raw_json FROM barcodes WHERE code = ?',
+    'SELECT code, item_id, product_name, brand, unit, pack_size, kcal_per_unit, protein_per_unit, fat_per_unit, source, raw_json FROM barcodes WHERE code = ?',
     cleanCode,
   );
 
@@ -200,6 +208,7 @@ export async function resolveBarcode(
           pack_size: cached.pack_size ?? 1,
           kcal_per_unit: cached.kcal_per_unit,
           protein_per_unit: cached.protein_per_unit,
+          fat_per_unit: cached.fat_per_unit,
           category: parsedCategory,
           source: cached.source,
         }
@@ -221,8 +230,8 @@ export async function resolveBarcode(
 
   run(
     db,
-    `INSERT INTO barcodes(code, item_id, product_name, brand, unit, pack_size, kcal_per_unit, protein_per_unit, source, raw_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO barcodes(code, item_id, product_name, brand, unit, pack_size, kcal_per_unit, protein_per_unit, fat_per_unit, source, raw_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(code) DO UPDATE SET
        product_name = excluded.product_name,
        brand = excluded.brand,
@@ -230,6 +239,7 @@ export async function resolveBarcode(
        pack_size = excluded.pack_size,
        kcal_per_unit = excluded.kcal_per_unit,
        protein_per_unit = excluded.protein_per_unit,
+       fat_per_unit = excluded.fat_per_unit,
        source = excluded.source,
        raw_json = excluded.raw_json,
        updated_at = excluded.updated_at`,
@@ -241,6 +251,7 @@ export async function resolveBarcode(
     product.pack_size,
     product.kcal_per_unit,
     product.protein_per_unit,
+    product.fat_per_unit ?? null,
     product.source,
     JSON.stringify(product),
     now,

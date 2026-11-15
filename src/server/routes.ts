@@ -37,7 +37,9 @@ import type { BarcodeLookupFn } from './barcodes.ts';
 import { bumpRev } from './db.ts';
 import type { Db } from './db.ts';
 import * as d from './domain.ts';
+import { guestCode, guestCodeMatches, guestLoginPage, guestPage, guestToken, regenerateGuestCode } from './guest.ts';
 import { createJobs, runShortcutAi } from './jobs.ts';
+import { findMeal, mealChoices, portionQty } from './shortcut.ts';
 import type { JobFile, RunAi } from './jobs.ts';
 import { ensureVapidKeys, notifyLowCrossings, sendTestPush, subscribePush, unsubscribePush } from './push.ts';
 import type { PushSender } from './push.ts';
@@ -108,9 +110,11 @@ export function createApp(deps: Deps): Hono<Env> {
   ensureVapidKeys(db);
   const jobs = createJobs({ db, runAi: deps.runAi, jobsDir, now, sendPush: deps.sendPush });
   const throttle = createThrottle();
+  const guestThrottle = createThrottle();
   const webDir = resolve(deps.webDir);
   const app = new Hono<Env>();
 
+  guestCode(db); // create it now so state() can just read it
   const state = (uid: number) => d.buildState(db, uid, { build, now: now(), ai: jobs.ai.ready });
   const json = async (c: Context): Promise<unknown> => {
     try { return await c.req.json(); } catch { return d.fail(400, 'The request body is not valid JSON'); }
@@ -150,7 +154,8 @@ export function createApp(deps: Deps): Hono<Env> {
       if (!tok) d.fail(401, 'Invalid or revoked token');
       const scopes = tok.scopes.split(',').map(s => s.trim());
       const isHealth = c.req.method === 'GET' && c.req.path === '/api/health';
-      const isShortcut = c.req.method === 'POST' && c.req.path === '/api/shortcut';
+      const isShortcut = (c.req.method === 'POST' && c.req.path === '/api/shortcut')
+        || (c.req.method === 'GET' && c.req.path === '/api/shortcut/meals');
       if (!isHealth && !(isShortcut && scopes.includes('shortcut'))) {
         d.fail(403, 'Token scope does not allow this route');
       }
@@ -195,6 +200,12 @@ export function createApp(deps: Deps): Hono<Env> {
 
   app.patch('/api/me', async c => {
     d.patchMe(db, c.get('uid'), parse(MeBody, await json(c)));
+    return c.json(state(c.get('uid')));
+  });
+
+  app.post('/api/guest/code', c => {
+    regenerateGuestCode(db);
+    bumpRev(db);
     return c.json(state(c.get('uid')));
   });
 
@@ -290,6 +301,33 @@ export function createApp(deps: Deps): Hono<Env> {
   app.post('/api/shortcut', async c => {
     const uid = c.get('uid');
     const body = parse(ShortcutBody, await json(c));
+
+    if (body.mode === 'ai') {
+      if (!body.text) d.fail(400, 'Say or write what to log');
+      const res = await runShortcutAi(db, { runAi: deps.runAi, jobsDir, now, sendPush: deps.sendPush }, uid, body.text!);
+      return c.json({ ok: true, ...res });
+    }
+
+    if (body.mode === 'log') {
+      const said = body.meal ?? body.preset ?? body.text;
+      const found = body.preset_id != null
+        ? ((p) => (p ? { kind: 'preset' as const, preset: p } : null))(d.listPresets(db, uid).find(x => x.id === body.preset_id))
+        : findMeal(db, uid, said, now());
+      if (!found) d.fail(404, said || body.preset_id != null ? 'No preset or cooked meal with that name' : 'You have no presets yet');
+      const label = found!.kind === 'preset' ? found!.preset.name : found!.meal.name;
+      const lines = found!.kind === 'preset'
+        ? found!.preset.lines
+        : [{ item_id: found!.meal.id, qty: portionQty(found!.meal, body.portions ?? 1) }];
+      if (!lines.length) d.fail(400, 'Preset has no items');
+      const { prevStocks, seq } = d.createEvent(
+        db, uid,
+        { cid: `sc-${randomUUID()}`, at: now(), kind: 'eat', preset_id: found!.kind === 'preset' ? found!.preset.id : null, note: label, lines },
+        now(), { source: 'shortcut' },
+      );
+      await pushLow(prevStocks);
+      return c.json({ ok: true, reply: `Logged ${label}`, event_ids: seq != null ? [seq] : [] });
+    }
+
     if (body.preset_id == null && !body.preset && !body.text) {
       d.fail(400, 'Provide text, preset, or preset_id');
     }
@@ -327,6 +365,9 @@ export function createApp(deps: Deps): Hono<Env> {
     const res = await runShortcutAi(db, { runAi: deps.runAi, jobsDir, now, sendPush: deps.sendPush }, uid, body.text!);
     return c.json({ ok: true, ...res });
   });
+
+  // For the Log-meal Shortcut's "Choose from List": every preset and cooked meal name, plus the best guess for now.
+  app.get('/api/shortcut/meals', c => c.json({ ok: true, ...mealChoices(db, c.get('uid'), now()) }));
 
   // ---- barcodes ----
   app.get('/api/barcodes/:code', async c => {
@@ -391,6 +432,25 @@ export function createApp(deps: Deps): Hono<Env> {
   app.delete('/api/jobs/:id', c => {
     jobs.dismiss(c.get('uid'), id(c));
     return c.json(state(c.get('uid')));
+  });
+
+  // ---- guest view (read-only shared pantry behind the household guest passcode; see guest.ts) ----
+  const html = (c: Context, body: string, status: ContentfulStatusCode = 200) => {
+    c.header('Cache-Control', 'no-store');
+    return c.html(body, status);
+  };
+  app.get('/guest', c => (getCookie(c, 'guest') === guestToken(db) ? html(c, guestPage(db, now())) : html(c, guestLoginPage())));
+  app.post('/guest', async c => {
+    const key = clientKey(c);
+    if (guestThrottle.blocked(key, now())) return html(c, guestLoginPage('Too many tries, wait a minute and try again'), 429);
+    const form = await c.req.parseBody().catch(() => ({} as Record<string, unknown>));
+    const code = typeof form.code === 'string' ? form.code : '';
+    if (!guestCodeMatches(db, code)) {
+      guestThrottle.fail(key, now());
+      return html(c, guestLoginPage('That passcode is not right'), 401);
+    }
+    setCookie(c, 'guest', guestToken(db), { httpOnly: true, sameSite: 'Lax', path: '/guest', maxAge: 30 * 86400, secure: !deps.insecureCookies });
+    return c.redirect('/guest', 303);
   });
 
   app.all('/api/*', () => d.fail(404, 'Not found'));

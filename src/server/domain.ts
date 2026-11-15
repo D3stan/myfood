@@ -86,6 +86,7 @@ interface ItemRow {
   shelf_life_days: number | null;
   kcal_per_unit: number | null;
   protein_per_unit: number | null;
+  fat_per_unit: number | null;
 }
 
 interface EventRow {
@@ -108,12 +109,13 @@ interface EventLineRow {
   expires_at: string | null;
   kcal: number | null;
   protein_g: number | null;
+  fat_g: number | null;
 }
 
 const eventLines = (db: Db, cid: string): EventLine[] =>
   all<EventLineRow>(
     db,
-    'SELECT item_id, qty, is_set, cost_cents, expires_at, kcal, protein_g FROM event_lines WHERE event_cid = ? ORDER BY rowid',
+    'SELECT item_id, qty, is_set, cost_cents, expires_at, kcal, protein_g, fat_g FROM event_lines WHERE event_cid = ? ORDER BY rowid',
     cid,
   ).map(l => {
     const out: EventLine = { item_id: l.item_id, qty: l.qty, is_set: !!l.is_set };
@@ -121,6 +123,7 @@ const eventLines = (db: Db, cid: string): EventLine[] =>
     if (l.expires_at !== null) out.expires_at = l.expires_at;
     if (l.kcal !== null) out.kcal = l.kcal;
     if (l.protein_g !== null) out.protein_g = l.protein_g;
+    if (l.fat_g !== null) out.fat_g = l.fat_g;
     return out;
   });
 
@@ -177,7 +180,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
   const items: Item[] = all<ItemRow>(
     db,
     `SELECT id, name, emoji, category, unit, step, pack_size, low_at,
-            owner_id, is_cooked, portion_g, expires_at, shelf_life_days, kcal_per_unit, protein_per_unit
+            owner_id, is_cooked, portion_g, expires_at, shelf_life_days, kcal_per_unit, protein_per_unit, fat_per_unit
      FROM items WHERE archived_at IS NULL`,
   )
     .map(i => {
@@ -199,6 +202,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
         shelf_life_days: i.shelf_life_days,
         kcal_per_unit: i.kcal_per_unit,
         protein_per_unit: i.protein_per_unit,
+        fat_per_unit: i.fat_per_unit,
       };
       if (rec) item.recipe = rec;
       return item;
@@ -246,11 +250,13 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     is_set: number;
     kcal: number | null;
     protein_g: number | null;
+    fat_g: number | null;
     kcal_per_unit: number | null;
     protein_per_unit: number | null;
+    fat_per_unit: number | null;
   }>(
     db,
-    `SELECT e.at, e.user_id, l.item_id, l.qty, l.is_set, l.kcal, l.protein_g, i.kcal_per_unit, i.protein_per_unit
+    `SELECT e.at, e.user_id, l.item_id, l.qty, l.is_set, l.kcal, l.protein_g, l.fat_g, i.kcal_per_unit, i.protein_per_unit, i.fat_per_unit
      FROM event_lines l
      JOIN events e ON e.cid = l.event_cid
      JOIN items i ON i.id = l.item_id
@@ -259,18 +265,19 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
   )) {
     if (r.is_set) continue;
     const n = eventLineNutrition(
-      { item_id: r.item_id, qty: r.qty, is_set: false, kcal: r.kcal, protein_g: r.protein_g },
-      { kcal_per_unit: r.kcal_per_unit, protein_per_unit: r.protein_per_unit },
+      { item_id: r.item_id, qty: r.qty, is_set: false, kcal: r.kcal, protein_g: r.protein_g, fat_g: r.fat_g },
+      { kcal_per_unit: r.kcal_per_unit, protein_per_unit: r.protein_per_unit, fat_per_unit: r.fat_per_unit },
     );
-    if (n.kcal <= 0 && n.protein_g <= 0) continue;
+    if (n.kcal <= 0 && n.protein_g <= 0 && n.fat_g <= 0) continue;
     const day = isoDate(r.at);
     const key = `${day}:${r.user_id}`;
     const cur = dailyMap.get(key);
     if (cur) {
       cur.kcal = Math.round(cur.kcal + n.kcal);
       cur.protein_g = round1(cur.protein_g + n.protein_g);
+      cur.fat_g = round1(cur.fat_g + n.fat_g);
     } else {
-      dailyMap.set(key, { day, user_id: r.user_id, kcal: Math.round(n.kcal), protein_g: round1(n.protein_g) });
+      dailyMap.set(key, { day, user_id: r.user_id, kcal: Math.round(n.kcal), protein_g: round1(n.protein_g), fat_g: round1(n.fat_g) });
     }
   }
   const daily_nutrition = [...dailyMap.values()].sort((a, b) =>
@@ -336,30 +343,34 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     expense_locks: all<ExpenseLock>(db, 'SELECT period, locked_by, locked_at, total_cents, event_count, note FROM expense_locks ORDER BY period DESC'),
     expenses,
     daily_nutrition,
+    guest_code: getMeta(db, 'guest_code') ?? '',
   };
 }
 
 function snapshotLineNutrition(db: Db, lines: EventLine[], snapshotNutrition: boolean): EventLine[] {
   if (!snapshotNutrition) return lines;
-  const rates = new Map<number, { kcal_per_unit: number | null; protein_per_unit: number | null }>();
+  type Rate = { kcal_per_unit: number | null; protein_per_unit: number | null; fat_per_unit: number | null };
+  const rates = new Map<number, Rate>();
   return lines.map(l => {
     if (l.is_set) return l;
     let rate = rates.get(l.item_id);
     if (!rate) {
-      rate = get<{ kcal_per_unit: number | null; protein_per_unit: number | null }>(
+      rate = get<Rate>(
         db,
-        'SELECT kcal_per_unit, protein_per_unit FROM items WHERE id = ?',
+        'SELECT kcal_per_unit, protein_per_unit, fat_per_unit FROM items WHERE id = ?',
         l.item_id,
-      ) ?? { kcal_per_unit: null, protein_per_unit: null };
+      ) ?? { kcal_per_unit: null, protein_per_unit: null, fat_per_unit: null };
       rates.set(l.item_id, rate);
     }
     const q = Math.abs(l.qty);
     const kcal = l.kcal ?? (rate.kcal_per_unit != null ? Math.round(q * rate.kcal_per_unit) : null);
     const protein_g = l.protein_g ?? (rate.protein_per_unit != null ? round1(q * rate.protein_per_unit) : null);
+    const fat_g = l.fat_g ?? (rate.fat_per_unit != null ? round1(q * rate.fat_per_unit) : null);
     return {
       ...l,
       ...(kcal !== null ? { kcal } : {}),
       ...(protein_g !== null ? { protein_g } : {}),
+      ...(fat_g !== null ? { fat_g } : {}),
     };
   });
 }
@@ -368,7 +379,7 @@ const insertLines = (db: Db, cid: string, lines: EventLine[]): void => {
   for (const l of lines) {
     run(
       db,
-      'INSERT INTO event_lines(event_cid, item_id, qty, is_set, cost_cents, expires_at, kcal, protein_g) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO event_lines(event_cid, item_id, qty, is_set, cost_cents, expires_at, kcal, protein_g, fat_g) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       cid,
       l.item_id,
       l.qty,
@@ -377,6 +388,7 @@ const insertLines = (db: Db, cid: string, lines: EventLine[]): void => {
       l.expires_at ?? null,
       l.kcal ?? null,
       l.protein_g ?? null,
+      l.fat_g ?? null,
     );
   }
 };
@@ -619,13 +631,15 @@ export function applyCookBatch(
 
     let ingKcal = 0;
     let ingProtein = 0;
+    let ingFat = 0;
     let hasKcal = false;
     let hasProtein = false;
+    let hasFat = false;
     const ingList: { item_id: number; qty: number }[] = [];
     for (const [itemId, qty] of agg) {
-      const item = get<{ id: number; unit: Unit; kcal_per_unit: number | null; protein_per_unit: number | null }>(
+      const item = get<{ id: number; unit: Unit; kcal_per_unit: number | null; protein_per_unit: number | null; fat_per_unit: number | null }>(
         db,
-        'SELECT id, unit, kcal_per_unit, protein_per_unit FROM items WHERE id = ? AND archived_at IS NULL',
+        'SELECT id, unit, kcal_per_unit, protein_per_unit, fat_per_unit FROM items WHERE id = ? AND archived_at IS NULL',
         itemId,
       );
       if (!item) fail(400, `Ingredient item ${itemId} does not exist`);
@@ -639,12 +653,19 @@ export function applyCookBatch(
         hasProtein = true;
         ingProtein += qty * item.protein_per_unit;
       }
+      if (item.fat_per_unit != null) {
+        hasFat = true;
+        ingFat += qty * item.fat_per_unit;
+      }
     }
 
-    const totalKcal = body.kcal_total ?? (hasKcal ? ingKcal : null);
-    const totalProtein = body.protein_total ?? (hasProtein ? ingProtein : null);
+    // The ingredients decide the macros; a typed total is only the fallback when they carry no data for that macro.
+    const totalKcal = hasKcal ? ingKcal : (body.kcal_total ?? null);
+    const totalProtein = hasProtein ? ingProtein : (body.protein_total ?? null);
+    const totalFat = hasFat ? ingFat : (body.fat_total ?? null);
     const kcalPerUnit = totalKcal != null ? round4(totalKcal / buyQty) : null;
     const proteinPerUnit = totalProtein != null ? round4(totalProtein / buyQty) : null;
+    const fatPerUnit = totalFat != null ? round4(totalFat / buyQty) : null;
 
     const expiresAt = body.expires_at
       ?? (opts?.expires_in_days != null ? addDays(isoDate(at), opts.expires_in_days) : addDays(isoDate(at), 4));
@@ -671,6 +692,7 @@ export function applyCookBatch(
            unit = ?, step = ?, pack_size = ?, portion_g = ?,
            kcal_per_unit = COALESCE(?, kcal_per_unit),
            protein_per_unit = COALESCE(?, protein_per_unit),
+           fat_per_unit = COALESCE(?, fat_per_unit),
            shelf_life_days = COALESCE(shelf_life_days, 4)
          WHERE id = ?`,
         mealName,
@@ -683,6 +705,7 @@ export function applyCookBatch(
         portionG,
         kcalPerUnit,
         proteinPerUnit,
+        fatPerUnit,
         mealItemId,
       );
     } else {
@@ -703,6 +726,7 @@ export function applyCookBatch(
              name = ?, emoji = ?, unit = ?, step = ?, pack_size = ?, portion_g = ?,
              kcal_per_unit = COALESCE(?, kcal_per_unit),
              protein_per_unit = COALESCE(?, protein_per_unit),
+             fat_per_unit = COALESCE(?, fat_per_unit),
              shelf_life_days = COALESCE(shelf_life_days, 4)
            WHERE id = ?`,
           mealName,
@@ -713,6 +737,7 @@ export function applyCookBatch(
           portionG,
           kcalPerUnit,
           proteinPerUnit,
+          fatPerUnit,
           mealItemId,
         );
       } else if (old) {
@@ -722,7 +747,7 @@ export function applyCookBatch(
           `UPDATE items SET
              name = ?, emoji = ?, category = 'meals', unit = ?, step = ?, pack_size = ?, low_at = NULL,
              owner_id = ?, is_cooked = 1, portion_g = ?, expires_at = NULL, shelf_life_days = 4,
-             kcal_per_unit = ?, protein_per_unit = ?, archived_at = NULL
+             kcal_per_unit = ?, protein_per_unit = ?, fat_per_unit = ?, archived_at = NULL
            WHERE id = ?`,
           mealName,
           mealEmoji,
@@ -733,6 +758,7 @@ export function applyCookBatch(
           portionG,
           kcalPerUnit,
           proteinPerUnit,
+          fatPerUnit,
           mealItemId,
         );
       } else {
@@ -741,8 +767,8 @@ export function applyCookBatch(
             db,
             `INSERT INTO items(
                name, name_key, emoji, category, unit, step, pack_size, low_at,
-               owner_id, is_cooked, portion_g, expires_at, shelf_life_days, kcal_per_unit, protein_per_unit, created_at
-             ) VALUES (?, ?, ?, 'meals', ?, ?, ?, NULL, ?, 1, ?, NULL, 4, ?, ?, ?)`,
+               owner_id, is_cooked, portion_g, expires_at, shelf_life_days, kcal_per_unit, protein_per_unit, fat_per_unit, created_at
+             ) VALUES (?, ?, ?, 'meals', ?, ?, ?, NULL, ?, 1, ?, NULL, 4, ?, ?, ?, ?)`,
             mealName,
             nameKey(mealName),
             mealEmoji,
@@ -753,6 +779,7 @@ export function applyCookBatch(
             portionG,
             kcalPerUnit,
             proteinPerUnit,
+            fatPerUnit,
             at,
           ).lastInsertRowid,
         );
@@ -973,7 +1000,7 @@ export function createItem(db: Db, b: ItemBody, now: number): void {
         `UPDATE items SET
            name = ?, emoji = ?, category = ?, unit = ?, step = ?, pack_size = ?, low_at = ?,
            owner_id = ?, is_cooked = ?, portion_g = ?, expires_at = ?, shelf_life_days = ?,
-           kcal_per_unit = ?, protein_per_unit = ?, archived_at = NULL
+           kcal_per_unit = ?, protein_per_unit = ?, fat_per_unit = ?, archived_at = NULL
          WHERE id = ?`,
         b.name,
         b.emoji,
@@ -989,6 +1016,7 @@ export function createItem(db: Db, b: ItemBody, now: number): void {
         b.shelf_life_days ?? null,
         b.kcal_per_unit ?? null,
         b.protein_per_unit ?? null,
+        b.fat_per_unit ?? null,
         itemId,
       );
     } else {
@@ -997,8 +1025,8 @@ export function createItem(db: Db, b: ItemBody, now: number): void {
           db,
           `INSERT INTO items(
              name, name_key, emoji, category, unit, step, pack_size, low_at,
-             owner_id, is_cooked, portion_g, expires_at, shelf_life_days, kcal_per_unit, protein_per_unit, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             owner_id, is_cooked, portion_g, expires_at, shelf_life_days, kcal_per_unit, protein_per_unit, fat_per_unit, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           b.name,
           nameKey(b.name),
           b.emoji,
@@ -1014,6 +1042,7 @@ export function createItem(db: Db, b: ItemBody, now: number): void {
           b.shelf_life_days ?? null,
           b.kcal_per_unit ?? null,
           b.protein_per_unit ?? null,
+          b.fat_per_unit ?? null,
           now,
         ).lastInsertRowid,
       );

@@ -59,6 +59,7 @@ if (mode === 'slow') {
         owner: /\bmy\b/i.test(user) ? 'mine' : 'shared',
         kcal_per_unit: 7.17,
         protein_per_unit: 0.008,
+        fat_per_unit: 0.81,
         expires_in_days: 30,
       },
       qty: 250,

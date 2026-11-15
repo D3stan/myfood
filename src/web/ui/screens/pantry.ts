@@ -40,12 +40,13 @@ function jobCard(j: Job) {
 }
 
 function macroSub(it: Item): string | null {
-  if (it.kcal_per_unit == null && it.protein_per_unit == null) return null;
+  if (it.kcal_per_unit == null && it.protein_per_unit == null && it.fat_per_unit == null) return null;
   const per100 = it.unit === 'g' || it.unit === 'ml';
   const mult = per100 ? 100 : 1;
   const parts: string[] = [];
   if (it.kcal_per_unit != null) parts.push(`${Math.round(it.kcal_per_unit * mult)} kcal`);
   if (it.protein_per_unit != null) parts.push(`${fmtNum(it.protein_per_unit * mult)}g P`);
+  if (it.fat_per_unit != null) parts.push(`${fmtNum(it.fat_per_unit * mult)}g F`);
   return per100 ? `${parts.join(' · ')} / 100${it.unit}` : parts.join(' · ');
 }
 

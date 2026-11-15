@@ -13,6 +13,7 @@ import { itemToFields, macroBasis } from '../src/web/ui/components/sheets.ts';
 import { appHtml, sheetHtml, toastHtml } from '../src/web/ui/render.ts';
 import { groupByDay } from '../src/web/ui/screens/history.ts';
 import { heroPreset } from '../src/web/ui/screens/pantry.ts';
+import { shortcutText } from '../src/web/ui/screens/shortcuts.ts';
 import { fixture } from './fixture.ts';
 
 const fresh = () => newStore(structuredClone(fixture));
@@ -160,7 +161,7 @@ describe('v2 sheets and helpers', () => {
   test('cookBatchMacros and cookSheet compute macros and g/portion live', () => {
     const s = fresh();
     const m = cookBatchMacros(fixture.items, [4, 6], { 4: 500, 6: 400 });
-    expect(m).toEqual({ kcal: 2450, protein: 148, hasKcal: true, hasProtein: true });
+    expect(m).toEqual({ kcal: 2450, protein: 148, fat: 0, hasKcal: true, hasProtein: true, hasFat: false });
 
     openSheet(s, { t: 'cook', id: 9, q: { 4: 500, 6: 400 }, lines: [4, 6] }, {
       cookName: 'Bolognese', cookEmoji: '🍲', cookOwner: 'mine',
@@ -445,5 +446,32 @@ describe('render smoke', () => {
       toastHtml(s),
     ];
     for (const o of outs) { expect(o.length).toBeGreaterThan(20); check(o); }
+  });
+});
+
+describe('siri shortcuts and guest card', () => {
+  test('Me tab offers both shortcuts with copyable setup text, and the guest passcode', () => {
+    const s = fresh();
+    s.ui.tab = 'me';
+    const out = appHtml(s);
+    expect(out).toContain('MyFood AI');
+    expect(out).toContain('Log meal');
+    expect(out).toContain('data-a="copyShortcut" data-k="ai"');
+    expect(out).toContain('data-a="copyShortcut" data-k="log"');
+    expect(out).toContain('abcd-2345');
+    expect(out).toContain('data-a="newGuestCode"');
+    // no token yet: the text says where to paste it
+    expect(out).toContain('&lt;PASTE YOUR TOKEN HERE&gt;');
+    s.ui.newToken = 'mf_secret123';
+    expect(appHtml(s)).toContain('Bearer mf_secret123');
+  });
+  test('shortcutText names the endpoints and the mode of each shortcut', () => {
+    const ai = shortcutText('ai', 'https://x.test', 'tok');
+    expect(ai).toContain('"https://x.test/api/shortcut"');
+    expect(ai).toContain('"mode" = "ai"');
+    expect(ai).not.toContain('/meals');
+    const log = shortcutText('log', 'https://x.test', 'tok');
+    expect(log).toContain('"https://x.test/api/shortcut/meals"');
+    expect(log).toContain('"mode" = "log"');
   });
 });

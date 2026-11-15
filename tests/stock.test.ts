@@ -50,7 +50,7 @@ test('level labels report the open amount and spare count', () => {
   expect(levelName(levelParts(1.5).open)).toBe('half');
   expect(amount(garlic, 1.5)).toBe('half +1');
   expect(levelReadLabel(garlic, 1.5)).toBe('🧄 Garlic: half +1');
-  expect(lineText([garlic], { item_id: garlic.id, qty: 0.5, is_set: true }, 'eat')).toBe('🧄 Garlic: half +1');
+  expect(lineText([garlic], { item_id: garlic.id, qty: 0.5, is_set: true, level_sealed_before: 1 }, 'eat')).toBe('🧄 Garlic: half +1');
 });
 
 test('float noise is rounded away', () => {
@@ -67,8 +67,8 @@ test('toLines: level buy adds, level eat sets, adjust sets, unknown items droppe
 test('set-to-value lines contribute no event or daily nutrition', () => {
   const event = { ...fixture.events[0]!, kind: 'eat' as const, counts_nutrition: true, at: fixture.now, user_id: 1,
     lines: [s(9, 0.5)] };
-  const levelItem = { id: 9, kcal_per_unit: 100, protein_per_unit: 25 };
-  expect(eventNutrition(event, [levelItem])).toEqual({ kcal: 0, protein_g: 0 });
+  const levelItem = { id: 9, kcal_per_unit: 100, protein_per_unit: 25, fat_per_unit: 5 };
+  expect(eventNutrition(event, [levelItem])).toEqual({ kcal: 0, protein_g: 0, fat_g: 0 });
   expect(computeDailyNutrition([event], [levelItem])).toEqual([]);
 });
 
@@ -90,14 +90,14 @@ test('applyOps shows pending work on top of server state and updates nutrition a
   expect(out.usual[1]).toBe(2);
   expect(fixture.items.find(i => i.id === 1)!.stock).toBe(7);
   const today = isoDate(fixture.now);
-  expect(out.daily_nutrition.find(x => x.day === today && x.user_id === 1)).toEqual({ day: today, user_id: 1, kcal: 156, protein_g: 12.6 });
+  expect(out.daily_nutrition.find(x => x.day === today && x.user_id === 1)).toEqual({ day: today, user_id: 1, kcal: 156, protein_g: 12.6, fat_g: 0 });
   // once the server lists the event, the pending op adds nothing
   expect(applyOps(out, [eat]).items.find(i => i.id === 1)!.stock).toBe(5);
   // undo of a server event
   const undone = applyOps(fixture, [{ type: 'undo', cid: 'ev-00000003' }]);
   expect(undone.items.find(i => i.id === 6)!.stock).toBe(1000);
   expect(undone.events.some(e => e.cid === 'ev-00000003')).toBe(false);
-  expect(undone.daily_nutrition.find(x => x.day === isoDate(fixture.events[0]!.at) && x.user_id === 2)).toEqual({ day: isoDate(fixture.events[0]!.at), user_id: 2, kcal: 0, protein_g: 0 });
+  expect(undone.daily_nutrition.find(x => x.day === isoDate(fixture.events[0]!.at) && x.user_id === 2)).toEqual({ day: isoDate(fixture.events[0]!.at), user_id: 2, kcal: 0, protein_g: 0, fat_g: 0 });
   // optimistic buy with cost shows in expenses
   const buy = { type: 'event' as const, body: { cid: 'pending-buy-1', at: fixture.now, kind: 'buy' as const, lines: [{ item_id: 1, qty: 10 }], cost_cents: 3000 } };
   const bought = applyOps(fixture, [buy]);
@@ -127,8 +127,8 @@ test('portionCount and eventNutrition / computeDailyNutrition', () => {
     kind: 'eat' as const, counts_nutrition: false,
     lines: [{ item_id: 4, qty: -500, is_set: false }],
   };
-  expect(eventNutrition(cookEat, fixture.items)).toEqual({ kcal: 0, protein_g: 0 });
-  expect(eventNutrition(fixture.events[1]!, fixture.items)).toEqual({ kcal: 657, protein_g: 40.2 });
+  expect(eventNutrition(cookEat, fixture.items)).toEqual({ kcal: 0, protein_g: 0, fat_g: 0 });
+  expect(eventNutrition(fixture.events[1]!, fixture.items)).toEqual({ kcal: 657, protein_g: 40.2, fat_g: 0 });
   const agg = computeDailyNutrition(fixture.events, fixture.items);
   expect(agg.find(d => d.user_id === 1)?.kcal).toBe(657);
 });
@@ -203,7 +203,7 @@ test('openDb migrates an existing v1 database idempotently without losing rows',
     raw.close();
 
     const db = openDb(file);
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
     expect(db.prepare('SELECT id, name, owner_id, is_cooked FROM items').get()).toEqual({ id: 1, name: 'Eggs', owner_id: null, is_cooked: 0 });
     expect(db.prepare('SELECT text, item_id FROM aliases').get()).toEqual({ text: 'oko aeg', item_id: 1 });
     expect(db.prepare('SELECT cid, counts_nutrition FROM events').get()).toEqual({ cid: 'c1', counts_nutrition: 1 });

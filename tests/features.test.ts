@@ -79,11 +79,11 @@ beforeEach(async () => {
 test('cook batch: portions+grams computes portion_g, macros from ingredients, counts_nutrition=0, skips usual, saves recipe', async () => {
   const s0 = await st('POST', '/api/items', {
     name: 'Minced beef', emoji: '🥩', category: 'meat', unit: 'g', step: 50, pack_size: 500, low_at: null,
-    kcal_per_unit: 2.0, protein_per_unit: 0.2,
+    kcal_per_unit: 2.0, protein_per_unit: 0.2, fat_per_unit: 0.15,
   });
   const s1 = await st('POST', '/api/items', {
     name: 'Pasta', emoji: '🍝', category: 'pantry', unit: 'g', step: 50, pack_size: 1000, low_at: 200,
-    kcal_per_unit: 3.5, protein_per_unit: 0.12,
+    kcal_per_unit: 3.5, protein_per_unit: 0.12, fat_per_unit: 0.01,
   });
   const s2 = await st('POST', '/api/items', {
     name: 'Salt', emoji: '🧂', category: 'spices', unit: 'level', step: 0.25, pack_size: 1, low_at: null,
@@ -98,7 +98,8 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
     lines: [{ item_id: beefId, qty: 1000 }, { item_id: pastaId, qty: 1000 }, { item_id: saltId, qty: 1.5 }],
   });
 
-  // Cook 4 portions = 1200g (300g per portion); total kcal = 500*2 + 400*3.5 = 2400; protein = 500*0.2 + 400*0.12 = 148
+  // Cook 4 portions = 1200g (300g per portion); total kcal = 500*2 + 400*3.5 = 2400; protein = 500*0.2 + 400*0.12 = 148; fat = 500*0.15 + 400*0.01 = 79.
+  // A typed (wrong) total must lose against the ingredients.
   const cooked = await st('POST', '/api/meals/cook', {
     cid: 'cook-batch-1',
     at: clock,
@@ -106,6 +107,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
     emoji: '🍲',
     portions: 4,
     total_g: 1200,
+    kcal_total: 99999, protein_total: 99999, fat_total: 99999,
     ingredients: [{ item_id: beefId, qty: 500 }, { item_id: pastaId, qty: 400 }, { item_id: saltId, qty: 0.25 }],
   });
 
@@ -120,6 +122,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
     expires_at: isoDate(clock + 4 * 86_400_000),
     kcal_per_unit: 2,
     protein_per_unit: 0.1233,
+    fat_per_unit: 0.0658,
     recipe: [{ item_id: beefId, qty: 500 }, { item_id: pastaId, qty: 400 }],
   });
   expect(cooked.items.find(i => i.id === beefId)!.stock).toBe(500);
@@ -137,7 +140,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
   });
   expect(afterEat.items.find(i => i.id === meal.id)!.stock).toBe(900);
   expect(afterEat.usual[meal.id]).toBe(300);
-  expect(afterEat.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: afterEat.me.id, kcal: 600, protein_g: 37 }]);
+  expect(afterEat.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: afterEat.me.id, kcal: 600, protein_g: 37, fat_g: 19.7 }]);
   expect(s0.rev).toBeLessThan(afterEat.rev);
 
   // Archiving an ingredient prunes it from meal_recipes so cookSheet has no stale Unknown line
@@ -400,4 +403,38 @@ test('shortcut: fast preset match skips AI; freeform text invokes runShortcutAi'
   expect(b2.event_ids).toHaveLength(1);
   expect(aiCalls).toBe(1);
   expect((await st('GET', '/api/state')).items[0]!.stock).toBe(7);
+});
+
+test('shortcut modes: ai always asks the AI; log matches presets and cooked meals, fuzzily, or guesses by time', async () => {
+  const s0 = await st('POST', '/api/items', { name: 'Eggs', emoji: '🥚', category: 'dairy', unit: 'pc', step: 1, pack_size: 10, low_at: null });
+  const eggsId = s0.items[0]!.id;
+  await st('POST', '/api/events', { cid: 'sc-seed-2', at: clock, kind: 'buy', lines: [{ item_id: eggsId, qty: 10 }] });
+  await st('POST', '/api/presets', { name: 'Morning', emoji: '🍳', hour: 8, lines: [{ item_id: eggsId, qty: 2 }] });
+  await st('POST', '/api/meals/cook', { cid: 'sc-cook-1', at: clock, name: 'Chili', portions: 4, total_g: 1200, ingredients: [] });
+  const tok = (await (await req('POST', '/api/tokens', { name: 'Shortcut' })).json()) as { token: string };
+  const sc = (method: string, path: string, body?: unknown) => app.request(path, {
+    method, headers: { Authorization: `Bearer ${tok.token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  let aiCalls = 0;
+  aiHandler = async () => { aiCalls++; return { reply: 'AI said hi', events: [] }; };
+  // text equal to a preset name still goes to the AI in mode ai
+  expect(await (await sc('POST', '/api/shortcut', { mode: 'ai', text: 'morning' })).json()).toMatchObject({ reply: 'AI said hi' });
+  expect(aiCalls).toBe(1);
+  expect((await sc('POST', '/api/shortcut', { mode: 'ai' })).status).toBe(400);
+
+  // list for "Choose from List"
+  expect(await (await sc('GET', '/api/shortcut/meals')).json()).toEqual({ ok: true, meals: ['Morning', 'Chili'], suggested: 'Morning' });
+  // a token with the shortcut scope still cannot read the state
+  expect((await sc('GET', '/api/state')).status).toBe(403);
+
+  // fuzzy preset, then empty = guess, then cooked meal (1 portion = 300 g), then nothing found
+  expect(await (await sc('POST', '/api/shortcut', { mode: 'log', meal: 'my morning' })).json()).toMatchObject({ reply: 'Logged Morning' });
+  expect(await (await sc('POST', '/api/shortcut', { mode: 'log' })).json()).toMatchObject({ reply: 'Logged Morning' });
+  expect(await (await sc('POST', '/api/shortcut', { mode: 'log', meal: 'chili', portions: 2 })).json()).toMatchObject({ reply: 'Logged Chili' });
+  expect((await sc('POST', '/api/shortcut', { mode: 'log', meal: 'sushi' })).status).toBe(404);
+  const s = await st('GET', '/api/state');
+  expect(s.items.find(i => i.id === eggsId)!.stock).toBe(6);
+  expect(s.items.find(i => i.name === 'Chili')!.stock).toBe(600);
+  expect(aiCalls).toBe(1);
 });

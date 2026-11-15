@@ -56,7 +56,7 @@ export function reviewSheet(v: V, sh: Sheet) {
     ${cookBatches.length ? html`<h3>Cooked batches</h3>${cookBatches.map((c, ci) => {
       const meal = c.meal_item_id != null ? st.items.find(i => i.id === c.meal_item_id) : undefined;
       const qtyBits = [c.portions ? `${fmtNum(c.portions)} port` : '', c.total_g ? `${fmtNum(c.total_g)} g` : ''].filter(Boolean).join(' · ');
-      const macroBits = [c.kcal_total != null ? `${Math.round(c.kcal_total)} kcal` : '', c.protein_total != null ? `${fmtNum(c.protein_total)}g P` : ''].filter(Boolean).join(' · ');
+      const macroBits = [c.kcal_total != null ? `${Math.round(c.kcal_total)} kcal` : '', c.protein_total != null ? `${fmtNum(c.protein_total)}g P` : '', c.fat_total != null ? `${fmtNum(c.fat_total)}g F` : ''].filter(Boolean).join(' · ');
       const exp = c.expires_in_days != null ? `exp ${addDays(today, c.expires_in_days)}` : '';
       return html`<div class="rv" id="rvc-${ci}">
         <div class="line"><span class="emoji">${meal?.emoji ?? c.emoji ?? '🍲'}</span>

@@ -47,6 +47,7 @@ export const NewItem = z.object({
   owner: z.enum(OWNER_SCOPES).nullish(),
   kcal_per_unit: amount.nullish(),
   protein_per_unit: amount.nullish(),
+  fat_per_unit: amount.nullish(),
   expires_in_days: z.number().int().min(0).max(3650).nullish(),
 });
 export type NewItem = z.infer<typeof NewItem>;
@@ -91,6 +92,7 @@ export const AiCook = z.object({
   owner: z.enum(OWNER_SCOPES).nullable(),
   kcal_total: amount.nullable(),
   protein_total: amount.nullable(),
+  fat_total: amount.nullish(),
   ingredients: z.array(AiCookIngredient).max(30),
 });
 export type AiCook = z.infer<typeof AiCook>;
@@ -172,6 +174,7 @@ export interface Item {
   /** Nutrition per 1 item.unit (for g/ml, per 1 g/ml; UI edits per 100). */
   kcal_per_unit: number | null;
   protein_per_unit: number | null;
+  fat_per_unit: number | null;
   /** Last saved ingredients for a cooked meal item. */
   recipe?: { item_id: number; qty: number }[];
 }
@@ -187,6 +190,7 @@ export interface EventLine {
   expires_at?: string | null;
   kcal?: number | null;
   protein_g?: number | null;
+  fat_g?: number | null;
 }
 
 export interface FoodEvent {
@@ -256,6 +260,7 @@ export interface DailyNutrition {
   user_id: number;
   kcal: number;
   protein_g: number;
+  fat_g: number;
 }
 
 export interface BarcodeProduct {
@@ -266,6 +271,7 @@ export interface BarcodeProduct {
   pack_size: number;
   kcal_per_unit: number | null;
   protein_per_unit: number | null;
+  fat_per_unit?: number | null;
   category: Category;
   source: 'manual' | 'openfoodfacts';
 }
@@ -307,6 +313,8 @@ export interface State {
   expenses: FoodEvent[];
   /** Last 30 days of daily nutrition totals per user. */
   daily_nutrition: DailyNutrition[];
+  /** Passcode for the read-only /guest page. Only ever sent to signed-in people. */
+  guest_code: string;
 }
 
 export interface Health { ok: true; build: string; ai: boolean | null }
@@ -359,6 +367,7 @@ export const ItemBody = z.object({
   shelf_life_days: z.number().int().min(1).max(3650).nullish(),
   kcal_per_unit: amount.nullish(),
   protein_per_unit: amount.nullish(),
+  fat_per_unit: amount.nullish(),
   barcode: z.string().trim().regex(/^\d{6,14}$/).nullish(),
 });
 export type ItemBody = z.infer<typeof ItemBody>;
@@ -407,6 +416,7 @@ export const CookBody = z.object({
   expires_at: isoDateStr.nullish(),
   kcal_total: amount.nullish(),
   protein_total: amount.nullish(),
+  fat_total: amount.nullish(),
   ingredients: z.array(CookIngredientIn).max(30),
 });
 export type CookBody = z.infer<typeof CookBody>;
@@ -432,6 +442,12 @@ export const ShortcutBody = z.object({
   text: z.string().trim().min(1).max(500).optional(),
   preset: name.optional(),
   preset_id: z.number().int().positive().optional(),
+  /** 'ai': always ask the AI (text required). 'log': log a preset or cooked meal by name (empty = best guess for the time of day). Omitted: the old behaviour. */
+  mode: z.enum(['ai', 'log']).optional(),
+  /** What the person said for mode 'log': a preset or cooked meal name. */
+  meal: name.optional(),
+  /** Portions of a cooked meal (default 1). */
+  portions: qty.optional(),
   async: z.boolean().optional(),
 });
 export type ShortcutBody = z.infer<typeof ShortcutBody>;

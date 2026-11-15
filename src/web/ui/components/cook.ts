@@ -9,13 +9,13 @@ import { stepOf, unitOf } from './bits.ts';
 import type { V } from './bits.ts';
 import { stepper } from './stepper.ts';
 
-/** Sums kcal and protein across selected ingredient quantities. */
+/** Sums kcal, protein and fat across selected ingredient quantities (the server does the same, and its sum wins). */
 export function cookBatchMacros(
   items: Item[],
   ids: number[],
   q: Record<string, number>,
-): { kcal: number; protein: number; hasKcal: boolean; hasProtein: boolean } {
-  let kcal = 0, protein = 0, hasKcal = false, hasProtein = false;
+): { kcal: number; protein: number; fat: number; hasKcal: boolean; hasProtein: boolean; hasFat: boolean } {
+  let kcal = 0, protein = 0, fat = 0, hasKcal = false, hasProtein = false, hasFat = false;
   for (const id of ids) {
     const qty = q[String(id)] ?? 0;
     if (!(qty > 0)) continue;
@@ -23,8 +23,9 @@ export function cookBatchMacros(
     if (!it || it.unit === 'level') continue;
     if (it.kcal_per_unit != null) { kcal += qty * it.kcal_per_unit; hasKcal = true; }
     if (it.protein_per_unit != null) { protein += qty * it.protein_per_unit; hasProtein = true; }
+    if (it.fat_per_unit != null) { fat += qty * it.fat_per_unit; hasFat = true; }
   }
-  return { kcal: Math.round(kcal), protein: Math.round(protein * 10) / 10, hasKcal, hasProtein };
+  return { kcal: Math.round(kcal), protein: Math.round(protein * 10) / 10, fat: Math.round(fat * 10) / 10, hasKcal, hasProtein, hasFat };
 }
 
 export function cookSheet(v: V, sh: Sheet) {
@@ -94,15 +95,19 @@ export function cookSheet(v: V, sh: Sheet) {
     </select>` : ''}
     <div class="row" style="gap:10px">
       <div class="grow">
-        <label class="field" for="f-cookKcal">Total kcal (batch)</label>
-        <input id="f-cookKcal" type="text" inputmode="decimal" placeholder="${auto.hasKcal ? String(auto.kcal) : 'Optional'}" data-f="cookKcal" value="${ui.f.cookKcal ?? ''}" autocomplete="off">
+        <label class="field" for="f-cookKcal">Batch kcal</label>
+        <input id="f-cookKcal" type="text" inputmode="decimal" placeholder="${auto.hasKcal ? String(auto.kcal) : 'Optional'}" data-f="cookKcal" value="${auto.hasKcal ? '' : ui.f.cookKcal ?? ''}" ${auto.hasKcal ? 'disabled' : ''} autocomplete="off">
       </div>
       <div class="grow">
-        <label class="field" for="f-cookProtein">Total protein g (batch)</label>
-        <input id="f-cookProtein" type="text" inputmode="decimal" placeholder="${auto.hasProtein ? fmtNum(auto.protein) : 'Optional'}" data-f="cookProtein" value="${ui.f.cookProtein ?? ''}" autocomplete="off">
+        <label class="field" for="f-cookProtein">Protein g</label>
+        <input id="f-cookProtein" type="text" inputmode="decimal" placeholder="${auto.hasProtein ? fmtNum(auto.protein) : 'Optional'}" data-f="cookProtein" value="${auto.hasProtein ? '' : ui.f.cookProtein ?? ''}" ${auto.hasProtein ? 'disabled' : ''} autocomplete="off">
+      </div>
+      <div class="grow">
+        <label class="field" for="f-cookFat">Fat g</label>
+        <input id="f-cookFat" type="text" inputmode="decimal" placeholder="${auto.hasFat ? fmtNum(auto.fat) : 'Optional'}" data-f="cookFat" value="${auto.hasFat ? '' : ui.f.cookFat ?? ''}" ${auto.hasFat ? 'disabled' : ''} autocomplete="off">
       </div>
     </div>
-    ${auto.hasKcal || auto.hasProtein ? html`<p class="small muted" style="margin:4px 0 0">Auto from ingredients: ${auto.kcal} kcal · ${fmtNum(auto.protein)}g protein</p>` : ''}
+    ${auto.hasKcal || auto.hasProtein || auto.hasFat ? html`<p class="small muted" style="margin:4px 0 0">Auto from ingredients: ${auto.kcal} kcal · ${fmtNum(auto.protein)}g protein${auto.hasFat ? ` · ${fmtNum(auto.fat)}g fat` : ''}. Typed totals only apply to macros the ingredients don't cover.</p>` : ''}
     <div class="row" style="margin-top:16px">
       <button class="btn alt" data-a="close">Cancel</button>
       <button class="btn right" data-a="saveCook" ${ui.online && !sh.busy ? '' : 'disabled'}>${sh.busy ? 'Saving…' : 'Log cooked batch'}</button>

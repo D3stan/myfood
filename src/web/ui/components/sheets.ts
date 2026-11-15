@@ -31,7 +31,7 @@ export const itemFields = (f: Record<string, string>, isNew: boolean) => {
     <label class="field" for="f-itemExpiry">Expires</label><input id="f-itemExpiry" type="date" data-f="itemExpiry" value="${f.itemExpiry ?? ''}">
     ${field(f, 'step', 'One tap changes by', true)}${field(f, 'pack', 'Units in a pack', true)}
     ${field(f, 'low', 'Running low at (empty = only when out)', true)}
-    ${field(f, 'itemKcal', `Calories (kcal / ${label})`, true)}${field(f, 'itemProtein', `Protein (g / ${label})`, true)}
+    ${field(f, 'itemKcal', `Calories (kcal / ${label})`, true)}${field(f, 'itemProtein', `Protein (g / ${label})`, true)}${field(f, 'itemFat', `Fat (g / ${label})`, true)}
     ${isNew ? field(f, 'start', 'How much is there now? (optional)', true) : ''}`;
 };
 
@@ -44,6 +44,7 @@ export const itemToFields = (i: Item): Record<string, string> => {
     itemExpiry: i.expires_at ?? '',
     itemKcal: i.kcal_per_unit == null ? '' : fmtNum(i.kcal_per_unit * mult),
     itemProtein: i.protein_per_unit == null ? '' : fmtNum(i.protein_per_unit * mult),
+    itemFat: i.fat_per_unit == null ? '' : fmtNum(i.fat_per_unit * mult),
     buyCost: '',
   };
 };
@@ -69,8 +70,12 @@ export function itemSheet(v: V, sh: Sheet) {
   const metaBits: string[] = [
     owner ? `${owner.emoji} ${owner.name}'s` : 'Shared',
     ...(it.expires_at ? [`Expires ${it.expires_at}`] : []),
-    ...(it.kcal_per_unit != null || it.protein_per_unit != null
-      ? [`${it.kcal_per_unit != null ? `${fmtNum(it.kcal_per_unit * mult)} kcal` : ''}${it.kcal_per_unit != null && it.protein_per_unit != null ? ' · ' : ''}${it.protein_per_unit != null ? `${fmtNum(it.protein_per_unit * mult)}g P` : ''} / ${label}`]
+    ...(it.kcal_per_unit != null || it.protein_per_unit != null || it.fat_per_unit != null
+      ? [`${[
+          it.kcal_per_unit != null ? `${fmtNum(it.kcal_per_unit * mult)} kcal` : '',
+          it.protein_per_unit != null ? `${fmtNum(it.protein_per_unit * mult)}g P` : '',
+          it.fat_per_unit != null ? `${fmtNum(it.fat_per_unit * mult)}g F` : '',
+        ].filter(Boolean).join(' · ')} / ${label}`]
       : []),
   ];
   return html`<h2 id="sheet-title">${it.emoji} ${it.name}</h2>
@@ -136,7 +141,7 @@ export function eventSheet(v: V, sh: Sheet) {
   const info = [
     clock(e.at),
     ...(e.cost_cents != null ? [fmtCost(e.cost_cents, st.currency)] : []),
-    ...(nut && (nut.kcal > 0 || nut.protein_g > 0) ? [`${nut.kcal} kcal · ${fmtNum(nut.protein_g)}g P`] : []),
+    ...(nut && (nut.kcal > 0 || nut.protein_g > 0 || nut.fat_g > 0) ? [`${nut.kcal} kcal · ${fmtNum(nut.protein_g)}g P · ${fmtNum(nut.fat_g)}g F`] : []),
     ...(e.note ? [e.note] : []),
   ];
   return html`<h2 id="sheet-title">${userOf(st, e)?.emoji ?? '🙂'} ${userOf(st, e)?.name ?? ''} ${levelReading ? 'set' : VERB[e.kind]}</h2>

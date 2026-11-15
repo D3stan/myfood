@@ -134,4 +134,13 @@ export function migrate(db: Db): void {
       `);
     });
   }
+
+  if (version < 2) {
+    transaction(db, () => {
+      addCol(db, 'items', 'fat_per_unit', 'REAL');
+      addCol(db, 'event_lines', 'fat_g', 'REAL');
+      addCol(db, 'barcodes', 'fat_per_unit', 'REAL');
+      db.exec('PRAGMA user_version = 2');
+    });
+  }
 }

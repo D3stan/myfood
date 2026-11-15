@@ -2,12 +2,13 @@ import { html } from '../../html.ts';
 import { isoDate } from '../../../shared/dates.ts';
 import { hourToTime } from '../components/bits.ts';
 import type { V } from '../components/bits.ts';
+import { SHORTCUTS, shortcutText } from './shortcuts.ts';
+import type { ShortcutKind } from './shortcuts.ts';
 
 export function me({ st, ui }: V) {
   const origin = typeof location !== 'undefined' && location.origin && location.origin !== 'null'
     ? location.origin
     : 'https://your-myfood-host';
-  const shortcutUrl = `${origin}/api/shortcut`;
 
   return html`
     <h1>Me</h1>
@@ -71,16 +72,21 @@ export function me({ st, ui }: V) {
           <button class="btn alt" data-a="revokeToken" data-id="${t.id}" ${ui.online ? '' : 'disabled'}>Revoke</button>
         </div>
       `)}</div>` : ''}
-      <div class="small muted" style="margin-top:12px">
-        <div><b>Endpoint:</b> <code>POST ${shortcutUrl}</code></div>
-        <div><b>Header:</b> <code>Authorization: Bearer &lt;token&gt;</code></div>
-        <div><b>Body (JSON):</b> <code>{"text":"log breakfast"}</code></div>
-        <ol style="padding-left:18px;margin:8px 0 0">
-          <li>Open iOS <b>Shortcuts</b> and create a new shortcut (e.g. "Log food").</li>
-          <li>Add <b>Ask for Input</b> (Text) or pass a phrase directly.</li>
-          <li>Add <b>Get Contents of URL</b> → URL: <code>${shortcutUrl}</code>, Method: <b>POST</b>, Header <code>Authorization: Bearer &lt;token&gt;</code>, Request Body: JSON <code>{"text": Provided Input}</code>.</li>
-          <li>Add <b>Get Dictionary Value</b> for <code>reply</code> and <b>Speak Text</b> / <b>Show Result</b>.</li>
-        </ol>
+      <p class="small muted" style="margin:12px 0 4px">Two shortcuts. Create a token above, copy a text below, then paste it into the Shortcuts app's AI builder (describe your shortcut) or follow the steps by hand.${ui.newToken ? ' The copied text includes your new token.' : ' Create a token first so the copy includes it, or paste it in yourself.'}</p>
+      ${(Object.keys(SHORTCUTS) as ShortcutKind[]).map(k => html`<div class="note" style="margin-top:8px">
+        <div class="row" style="gap:8px;align-items:center"><b class="grow">${SHORTCUTS[k].name}</b><button class="btn alt" data-a="copyShortcut" data-k="${k}">Copy setup text</button></div>
+        <div class="small muted">${SHORTCUTS[k].blurb}</div>
+        <details><summary class="small">Show the steps</summary><pre class="small" style="white-space:pre-wrap;word-break:break-word;margin:6px 0 0">${shortcutText(k, origin, ui.newToken)}</pre></details>
+      </div>`)}
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Guest access</h2>
+      <p class="small muted" style="margin:0 0 8px">Visitors open <code>${origin}/guest</code> and type this passcode to see the shared pantry (read-only, personal items hidden).</p>
+      <div class="row" style="gap:8px;align-items:center">
+        <code style="flex:1;font-size:1.3rem" id="guest-code">${st.guest_code || '—'}</code>
+        <button class="btn alt" data-a="copyGuest">Copy</button>
+        <button class="btn alt" data-a="newGuestCode" ${ui.online ? '' : 'disabled'}>New code</button>
       </div>
     </div>
 
