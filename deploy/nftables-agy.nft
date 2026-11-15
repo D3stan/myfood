@@ -1,0 +1,13 @@
+#!/usr/sbin/nft -f
+# /etc/nftables.d/agy.nft — the AI CLI user may reach the internet but not the home LAN
+# (except the router for DNS), so a hostile receipt cannot turn it against other devices.
+table inet myfood_agy
+delete table inet myfood_agy
+table inet myfood_agy {
+  chain out {
+    type filter hook output priority 0; policy accept;
+    meta skuid "agy" ip daddr 192.168.2.1 udp dport 53 accept
+    meta skuid "agy" ip daddr 192.168.2.1 tcp dport 53 accept
+    meta skuid "agy" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } drop
+  }
+}

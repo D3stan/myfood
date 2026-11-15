@@ -1,0 +1,20 @@
+[Unit]
+Description=MyFood pantry app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# A service account with no sudo rights except the one line in /etc/sudoers.d/myfood. The login user myfood is the admin.
+User=pantry
+Group=pantry
+WorkingDirectory=/opt/myfood
+EnvironmentFile=/etc/myfood.env
+ExecStart=/usr/bin/node src/server/main.ts
+Restart=always
+RestartSec=3
+# The AI wrapper runs through sudo as agy inside this unit, so no NoNewPrivileges and no ProtectHome (agy needs its own home).
+ProtectSystem=full
+ReadWritePaths=/var/lib/myfood /var/lib/myfood-jobs
+
+[Install]
+WantedBy=multi-user.target

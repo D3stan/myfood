@@ -1,0 +1,19 @@
+[Unit]
+Description=Cloudflare tunnel MYFOOD (food.0xpuddu.com -> localhost:3000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=cloudflared
+# TUNNEL_TOKEN lives in this root-only file, not in the unit or the process list.
+EnvironmentFile=/etc/cloudflared/token.env
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

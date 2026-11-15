@@ -1,0 +1,2 @@
+# /etc/sudoers.d/myfood — the app may run the AI wrapper as agy, and nothing else.
+pantry ALL=(agy) NOPASSWD: /usr/local/bin/run-agy
