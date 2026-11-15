@@ -8,12 +8,14 @@
     "dev:web": "vite",
     "build": "tsc --noEmit && vite build",
     "start": "node --env-file-if-exists=.env src/server/main.ts",
+    "mcp": "node --env-file-if-exists=.env src/server/mcp-stdio.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "seed": "node --env-file-if-exists=.env scripts/seed.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.8",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "hono": "^4.13.18",
     "idiomorph": "^0.8.0",
     "web-push": "^4.0.0",

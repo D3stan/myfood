@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -40,6 +41,7 @@ import { createJobs, runShortcutAi } from './jobs.ts';
 import type { JobFile, RunAi } from './jobs.ts';
 import { ensureVapidKeys, notifyLowCrossings, sendTestPush, subscribePush, unsubscribePush } from './push.ts';
 import type { PushSender } from './push.ts';
+import { createMyFoodMcpServer } from './mcp.ts';
 
 export interface Deps {
   db: Db;
@@ -54,6 +56,8 @@ export interface Deps {
   insecureCookies?: boolean;
   sendPush?: PushSender;
   lookupBarcode?: BarcodeLookupFn;
+  /** Secret protecting the /mcp Streamable HTTP endpoint (disabled with 503 when unset). */
+  mcpSecret?: string;
 }
 export type AppOpts = Deps;
 
@@ -80,6 +84,21 @@ function parse<T>(schema: ZodType<T>, data: unknown): T {
   const r = schema.safeParse(data);
   if (r.success) return r.data;
   d.fail(400, r.error.issues.map(i => (i.path.length ? `${i.path.join('.')}: ` : '') + i.message).join('; '));
+}
+
+function extractMcpSecret(c: Context): string | null {
+  const authHdr = c.req.header('authorization')?.trim();
+  if (authHdr) {
+    const m = /^Bearer\s+(.+)$/i.exec(authHdr);
+    return m?.[1]?.trim() || null;
+  }
+  return c.req.header('x-mcp-secret')?.trim() || null;
+}
+
+function sameSecret(a: string, b: string): boolean {
+  const da = createHash('sha256').update(a).digest();
+  const db = createHash('sha256').update(b).digest();
+  return timingSafeEqual(da, db);
 }
 
 export function createApp(deps: Deps): Hono<Env> {
@@ -375,6 +394,46 @@ export function createApp(deps: Deps): Hono<Env> {
   });
 
   app.all('/api/*', () => d.fail(404, 'Not found'));
+
+  // ---- MCP Streamable HTTP (stateless, authenticated by MCP_SECRET only) ----
+  app.all('/mcp', async c => {
+    c.header('Cache-Control', 'no-store');
+    const secret = deps.mcpSecret?.trim();
+    if (!secret) {
+      return c.json({ error: 'MCP server is disabled (MCP_SECRET not set)' }, 503);
+    }
+    const provided = extractMcpSecret(c);
+    if (!provided || !sameSecret(provided, secret)) {
+      c.header('WWW-Authenticate', 'Bearer');
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    if (c.req.method !== 'POST') {
+      return c.json(
+        { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null },
+        405,
+        { Allow: 'POST' },
+      );
+    }
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    const mcp = createMyFoodMcpServer(db, {
+      now,
+      build,
+      lookupBarcode: deps.lookupBarcode,
+      onLowCrossings: pushLow,
+    });
+    try {
+      await mcp.connect(transport);
+      const res = await transport.handleRequest(c.req.raw);
+      res.headers.set('Cache-Control', 'no-store');
+      return res;
+    } finally {
+      await transport.close();
+      await mcp.close();
+    }
+  });
 
   // ---- static files; index.html answers every other GET ----
   app.get('*', c => {

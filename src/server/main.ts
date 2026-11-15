@@ -23,7 +23,16 @@ ensureVapidKeys(db);
 const buildFile = join(webDir, 'build.txt');
 const build = existsSync(buildFile) ? readFileSync(buildFile, 'utf8').trim() : 'dev';
 
-const app = createApp({ db, runAi, dataDir, jobsDir, build, webDir, insecureCookies: process.env.INSECURE_COOKIES === '1' });
+const app = createApp({
+  db,
+  runAi,
+  dataDir,
+  jobsDir,
+  build,
+  webDir,
+  insecureCookies: process.env.INSECURE_COOKIES === '1',
+  mcpSecret: process.env.MCP_SECRET,
+});
 serve({ fetch: app.fetch, port, hostname: host }, i => console.log(`MyFood ${build} on http://${host}:${i.port}`));
 
 // Check expiry notifications every 15 minutes during the morning window (08:00-09:59 local time).
