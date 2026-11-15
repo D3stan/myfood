@@ -213,3 +213,75 @@ test('security headers on every response, no-store on the API, API works without
   expect(page.status).toBe(404);
   expect(page.headers.get('x-content-type-options')).toBe('nosniff');
 });
+
+test('ownership: same item name allowed for shared and personal, clashes within same owner', async () => {
+  const s0 = await st('GET', '/api/state');
+  const aliceId = s0.me.id;
+  // Shared "Eggs" already exists; Alice can create personal "Eggs"
+  const s1 = await st('POST', '/api/items', { ...item('Eggs'), owner_id: aliceId });
+  const personalEggs = s1.items.find(i => i.name === 'Eggs' && i.owner_id === aliceId)!;
+  expect(personalEggs).toBeTruthy();
+
+  // Duplicate personal "Eggs" for Alice -> 409
+  expect((await req('POST', '/api/items', { ...item('eggs'), owner_id: aliceId })).status).toBe(409);
+
+  // Moving personal "Eggs" to shared clashes with shared "Eggs" -> 409
+  expect((await req('PATCH', `/api/items/${personalEggs.id}`, { owner_id: null })).status).toBe(409);
+
+  // Bob can also have personal "Eggs"
+  const bobId = s0.users.find(u => u.name === 'Bob')!.id;
+  const s2 = await st('POST', '/api/items', { ...item('Eggs'), owner_id: bobId });
+  expect(s2.items.filter(i => i.name === 'Eggs')).toHaveLength(3);
+});
+
+test('nutrition snapshots on eat, daily_nutrition aggregation, and me/settings updates', async () => {
+  const s0 = await st('POST', '/api/items', {
+    name: 'Oats', emoji: '🥣', category: 'pantry', unit: 'g', step: 50, pack_size: 1000, low_at: 200,
+    kcal_per_unit: 3.7, protein_per_unit: 0.13,
+  });
+  const oatsId = idOf(s0, 'Oats');
+  const s1 = await st('POST', '/api/events', {
+    cid: 'nut-eat-1', at: clock, kind: 'eat',
+    lines: [{ item_id: oatsId, qty: 100 }],
+  });
+  expect(s1.events[0]!.lines[0]).toMatchObject({ item_id: oatsId, qty: -100, kcal: 370, protein_g: 13 });
+  expect(s1.daily_nutrition).toEqual([{ day: '1970-01-01', user_id: s1.me.id, kcal: 370, protein_g: 13 }]);
+
+  // Editing item macros later does not alter historical snapshot
+  await st('PATCH', `/api/items/${oatsId}`, { kcal_per_unit: 10 });
+  const s2 = await st('GET', '/api/state');
+  expect(s2.events[0]!.lines[0]!.kcal).toBe(370);
+  expect(s2.daily_nutrition[0]!.kcal).toBe(370);
+
+  // Settings & Me notification toggles
+  const s3 = await st('PATCH', '/api/settings', { currency: 'EUR' });
+  expect(s3.currency).toBe('EUR');
+  const s4 = await st('PATCH', '/api/me', { notify_low: false, notify_expiry: false });
+  expect(s4.me).toMatchObject({ notify_low: false, notify_expiry: false });
+});
+
+test('expiry updates on buy: sets shelf_life_days or min(existing, new) when in stock', async () => {
+  const s0 = await st('POST', '/api/items', {
+    name: 'Milk', emoji: '🥛', category: 'dairy', unit: 'ml', step: 100, pack_size: 1000, low_at: 200,
+    shelf_life_days: 7,
+  });
+  const milkId = idOf(s0, 'Milk');
+
+  // Buy with no explicit expires_at uses shelf_life_days (+7d = 1970-01-08)
+  let s = await st('POST', '/api/events', { cid: 'exp-buy-1', at: clock, kind: 'buy', lines: [{ item_id: milkId, qty: 1000 }] });
+  expect(s.items.find(i => i.id === milkId)!.expires_at).toBe('1970-01-08');
+
+  // Buying a fresher carton (1970-01-12) while in stock keeps earlier 1970-01-08
+  s = await st('POST', '/api/events', {
+    cid: 'exp-buy-2', at: clock + 1000, kind: 'buy',
+    lines: [{ item_id: milkId, qty: 1000, expires_at: '1970-01-12' }],
+  });
+  expect(s.items.find(i => i.id === milkId)!.expires_at).toBe('1970-01-08');
+
+  // Buying an earlier-expiring carton (1970-01-04) updates to 1970-01-04
+  s = await st('POST', '/api/events', {
+    cid: 'exp-buy-3', at: clock + 2000, kind: 'buy',
+    lines: [{ item_id: milkId, qty: 1000, expires_at: '1970-01-04' }],
+  });
+  expect(s.items.find(i => i.id === milkId)!.expires_at).toBe('1970-01-04');
+});

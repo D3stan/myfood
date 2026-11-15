@@ -3,8 +3,12 @@ import { ApiError } from '../src/web/api.ts';
 import { html, htmlToString } from '../src/web/html.ts';
 import { flush } from '../src/web/outbox.ts';
 import { applyOps } from '../src/shared/stock.ts';
-import type { PendingOp, State } from '../src/shared/types.ts';
-import { enqueueEvent, enqueueUndo, newStore, openSheet, receive, stepQ, qOf, view } from '../src/web/store.ts';
+import type { BarcodeLookup, PendingOp, State } from '../src/shared/types.ts';
+import { enqueueEvent, enqueueUndo, newStore, openSheet, qOf, receive, stepQ, view } from '../src/web/store.ts';
+import { findCreatedItem, visibleLowItems } from '../src/web/ui/actions.ts';
+import { barcodeToFields, stopScanner } from '../src/web/ui/components/barcode.ts';
+import { cookBatchMacros } from '../src/web/ui/components/cook.ts';
+import { itemToFields, macroBasis } from '../src/web/ui/components/sheets.ts';
 import { appHtml, sheetHtml, toastHtml } from '../src/web/ui/render.ts';
 import { groupByDay } from '../src/web/ui/screens/history.ts';
 import { heroPreset } from '../src/web/ui/screens/pantry.ts';
@@ -119,6 +123,146 @@ describe('hero preset and history days', () => {
   });
 });
 
+describe('v2 sheets and helpers', () => {
+  test('macroBasis and itemToFields scale g/ml by 100 and pc/slice/portion by 1', () => {
+    expect(macroBasis('g')).toEqual({ mult: 100, label: '100g' });
+    expect(macroBasis('ml')).toEqual({ mult: 100, label: '100ml' });
+    expect(macroBasis('pc')).toEqual({ mult: 1, label: '1 pc' });
+    expect(macroBasis('portion')).toEqual({ mult: 1, label: '1 portion' });
+
+    const beefFields = itemToFields(fixture.items.find(i => i.id === 4)!);
+    expect(beefFields.itemKcal).toBe('210');
+    expect(beefFields.itemProtein).toBe('20');
+    expect(beefFields.itemOwner).toBe('shared');
+
+    const eggFields = itemToFields(fixture.items.find(i => i.id === 1)!);
+    expect(eggFields.itemKcal).toBe('78');
+    expect(eggFields.itemProtein).toBe('6.3');
+
+    const bologneseFields = itemToFields(fixture.items.find(i => i.id === 9)!);
+    expect(bologneseFields.itemOwner).toBe('mine');
+    expect(bologneseFields.itemKcal).toBe('140');
+    expect(bologneseFields.itemProtein).toBe('9');
+  });
+
+  test('cooked meal item sheet shows Portions/Grams toggle and converts portions', () => {
+    const s = fresh();
+    openSheet(s, { t: 'item', id: 9, q: { main: 1 }, portionMode: true }, itemToFields(fixture.items.find(i => i.id === 9)!));
+    const out = sheetHtml(s);
+    expect(out).toContain('3 port · 900 g');
+    expect(out).toContain('data-a="portionMode"');
+    expect(out).toContain('Portions (300g)');
+    expect(out).toContain('data-f="buyCost"');
+    expect(out).toContain('data-s="cook"');
+  });
+
+  test('cookBatchMacros and cookSheet compute macros and g/portion live', () => {
+    const s = fresh();
+    const m = cookBatchMacros(fixture.items, [4, 6], { 4: 500, 6: 400 });
+    expect(m).toEqual({ kcal: 2450, protein: 148, hasKcal: true, hasProtein: true });
+
+    openSheet(s, { t: 'cook', id: 9, q: { 4: 500, 6: 400 }, lines: [4, 6] }, {
+      cookName: 'Bolognese', cookEmoji: '🍲', cookOwner: 'mine',
+      cookPortions: '4', cookGrams: '1200', cookExpiry: '2026-11-19',
+    });
+    const out = sheetHtml(s);
+    expect(out).toContain('300 g / portion');
+    expect(out).toContain('Auto from ingredients: 2450 kcal · 148g protein');
+    expect(out).toContain('data-f="cookPortions"');
+    expect(out).toContain('data-f="cookGrams"');
+    expect(out).toContain('data-f="cookKcal"');
+    expect(out).toContain('data-f="cookProtein"');
+  });
+
+  test('composeSheet mode switch and reviewSheet audit diff + cook batch summary', () => {
+    const s = fresh();
+    s.ui.jobMode = 'audit';
+    openSheet(s, { t: 'compose', q: {}, mode: 'audit' });
+    const cmp = sheetHtml(s);
+    expect(cmp).toContain('Fridge audit');
+    expect(cmp).toContain('data-a="jobMode"');
+
+    // Review sheet for audit job + cook batch
+    s.server!.jobs.push({
+      id: 11, mode: 'audit', status: 'review', text: '', has_images: true, error: null, event_cids: [], created_at: fixture.now,
+      result: {
+        reply: 'Checked fridge.',
+        events: [{ kind: 'adjust', preset_id: null, lines: [{ item_id: 1, new_item: null, qty: 4, raw: '4 eggs visible' }] }],
+        cook: [{ meal_item_id: null, name: 'Chili', emoji: '🌶️', portions: 4, total_g: 1200, expires_in_days: 4, owner: 'shared', kcal_total: 1800, protein_total: 120, ingredients: [{ item_id: 4, qty: 500 }] }],
+      },
+    });
+    openSheet(s, {
+      t: 'review', id: 11, q: {},
+      events: structuredClone(s.server!.jobs[1]!.result!.events),
+      orig: structuredClone(s.server!.jobs[1]!.result!.events),
+      cook: structuredClone(s.server!.jobs[1]!.result!.cook),
+    });
+    const rev = sheetHtml(s);
+    expect(rev).toContain('Fridge audit — review adjustments');
+    expect(rev).toContain('was 7 → 4 pc');
+    expect(rev).toContain('Chili');
+    expect(rev).toContain('4 port · 1200 g');
+    expect(rev).toContain('Apply adjustments');
+  });
+
+  test('barcodeSheet fallback, matched/unmatched states, and stopScanner cleanup', () => {
+    const s = fresh();
+    const lkUnmatched: BarcodeLookup = {
+      found: true, code: '5701234567890', item_id: null,
+      product: { code: '5701234567890', product_name: 'Oat Milk', brand: 'Oatly', unit: 'ml', pack_size: 1000, kcal_per_unit: 0.46, protein_per_unit: 0.01, category: 'drinks', source: 'openfoodfacts' },
+    };
+    const fields = barcodeToFields(lkUnmatched);
+    expect(fields.bcKcal).toBe('46');
+    expect(fields.bcProtein).toBe('1');
+    s.ui.barcodeLookup = lkUnmatched;
+    s.ui.f = { ...s.ui.f, ...fields, barcodeCode: '5701234567890' };
+    openSheet(s, { t: 'barcode', q: {} });
+    const outUnmatched = sheetHtml(s);
+    expect(outUnmatched).toContain('Snap photo instead');
+    expect(outUnmatched).toContain('Create &amp; Add');
+    expect(outUnmatched).toContain('Or link to existing item');
+
+    s.ui.barcodeLookup = { ...lkUnmatched, item_id: 1 };
+    const outMatched = sheetHtml(s);
+    expect(outMatched).toContain('Add pack (+10 pc)');
+
+    s.ui.scannerActive = true;
+    stopScanner(s);
+    expect(s.ui.scannerActive).toBe(false);
+  });
+
+  test('expenseSheet and spend screen render weekly expenses and locks', () => {
+    const s = fresh();
+    openSheet(s, { t: 'expense', q: {} }, { expCost: '95.50', expNote: 'Takeout', expDate: '2026-11-15' });
+    const expOut = sheetHtml(s);
+    expect(expOut).toContain('data-f="expCost"');
+    expect(expOut).toContain('data-f="expNote"');
+    expect(expOut).toContain('data-f="expDate"');
+
+    s.ui.tab = 'spend';
+    const spendOut = appHtml(s, new Date(fixture.now));
+    expect(spendOut).toContain('REMA 1000');
+    expect(spendOut).toContain('124.50 kr');
+    expect(spendOut).toContain('Locked');
+    expect(spendOut).toContain('data-a="lockWeek"');
+    expect(spendOut).toContain('data-a="exportExpenses"');
+  });
+
+  test('visibleLowItems excludes other users personal items and findCreatedItem matches owner_id + nameKey', () => {
+    const f = structuredClone(fixture);
+    f.items.push(
+      { ...fixture.items[0]!, id: 99, name: 'Robins snack', owner_id: 2, stock: 0, low_at: 2 },
+      { ...fixture.items[0]!, id: 100, name: 'Sams snack', owner_id: 1, stock: 0, low_at: 2 },
+      { ...fixture.items[0]!, id: 101, name: '  eggs  ', owner_id: 1, stock: 0, low_at: null },
+    );
+    const lowIds = visibleLowItems(f).map(i => i.id);
+    expect(lowIds).not.toContain(99);
+    expect(lowIds).toContain(100);
+    expect(findCreatedItem(f.items, 'Eggs', 1)?.id).toBe(101);
+    expect(findCreatedItem(f.items, 'Eggs', null)?.id).toBe(1);
+  });
+});
+
 describe('render smoke', () => {
   const evil = '<img src=x onerror=alert(1)>';
   const bad = (): ReturnType<typeof fresh> => {
@@ -127,12 +271,26 @@ describe('render smoke', () => {
     f.presets[0]!.name = evil;
     f.me.name = evil;
     f.events[1]!.note = evil;
+    f.expenses[0]!.note = evil;
     f.jobs[0]!.result!.reply = evil;
     f.jobs[0]!.result!.events[0]!.lines[0]!.raw = evil;
     f.jobs[0]!.result!.events[0]!.lines[2]!.new_item!.name = evil;
+    f.jobs[0]!.result!.cook = [{
+      meal_item_id: null, name: evil, emoji: '🍲', portions: 2, total_g: 600,
+      expires_in_days: 4, owner: 'shared', kcal_total: 900, protein_total: 60,
+      ingredients: [{ item_id: 1, qty: 2 }],
+    }];
     f.jobs.push({ ...f.jobs[0]!, id: 10, status: 'failed', error: evil, result: null });
     const s = newStore(f);
-    s.ui.f = { search: evil, meName: evil, name: evil, text: evil, code: evil };
+    s.ui.f = {
+      search: evil, meName: evil, name: evil, text: evil, code: evil,
+      cookName: evil, expNote: evil, bcName: evil, currency: evil, tokenName: evil,
+    };
+    s.ui.newToken = evil;
+    s.ui.barcodeLookup = {
+      found: true, code: '12345678', item_id: null,
+      product: { code: '12345678', product_name: evil, brand: evil, unit: 'g', pack_size: 100, kcal_per_unit: 1, protein_per_unit: 0.1, category: 'pantry', source: 'openfoodfacts' },
+    };
     s.ui.standalone = false;
     s.ui.toast = { id: 1, msg: evil, cids: ['a'] };
     return s;
@@ -145,14 +303,18 @@ describe('render smoke', () => {
   test('every screen escapes hostile text', () => {
     const s = bad();
     const seen: string[] = [];
-    for (const tab of ['pantry', 'history', 'me'] as const) { s.ui.tab = tab; seen.push(appHtml(s, new Date(2026, 10, 15, 8))); }
+    for (const tab of ['pantry', 'spend', 'history', 'me'] as const) {
+      s.ui.tab = tab;
+      seen.push(appHtml(s, new Date(2026, 10, 15, 8)));
+    }
     s.server = null; s.ui.loggedOut = true;
     seen.push(appHtml(s));
     for (const o of seen) check(o);
     expect(seen[0]).toContain('&lt;img src=x');
     expect(seen[0]).toContain('Running low');
+    expect(seen[0]).toContain('Eat soon');
     expect(seen[0]).toContain('Log it');
-    expect(seen[3]).toContain('autocapitalize="off"');
+    expect(seen[4]).toContain('autocapitalize="off"');
   });
 
   test('every sheet and the toast escape hostile text', () => {
@@ -162,9 +324,14 @@ describe('render smoke', () => {
       return sheetHtml(s);
     };
     const events = structuredClone(s.server!.jobs[0]!.result!.events);
+    const cook = structuredClone(s.server!.jobs[0]!.result!.cook);
     const outs = [
-      open('item', 1, { more: true }), open('preset', 1), open('presetEdit', 1), open('presetEdit'), open('itemForm'),
-      open('event', 'ev-00000002'), open('compose'), open('review', 9, { events, orig: structuredClone(events) }), toastHtml(s),
+      open('item', 1, { more: true }), open('item', 9, { portionMode: true }),
+      open('preset', 1), open('presetEdit', 1), open('presetEdit'), open('itemForm'),
+      open('event', 'ev-00000002'), open('compose'),
+      open('review', 9, { events, orig: structuredClone(events), cook }),
+      open('cook', 9), open('barcode'), open('expense'),
+      toastHtml(s),
     ];
     for (const o of outs) { expect(o.length).toBeGreaterThan(20); check(o); }
   });

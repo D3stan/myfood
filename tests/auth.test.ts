@@ -105,3 +105,58 @@ test('static files: index fallback, cache headers, no path traversal', async () 
   expect(await (await app.request('/..%2f..%2fetc/passwd')).text()).toBe('<h1>hi</h1>');
   expect((await app.request('/api/state')).status).toBe(401);
 });
+
+test('api tokens: create, bearer auth bypasses cookie & X-MyFood, enforces shortcut scope, revoke', async () => {
+  const { app, db, state, post } = setup();
+  const sid = (await post('/api/login', { code: 'aaaa-aaaa-aaaa' })).headers.get('set-cookie')!.split(';')[0]!;
+
+  // Create preset & item so /api/shortcut has something to match
+  const itemRes = await post('/api/items', { name: 'Eggs', emoji: '🥚', category: 'dairy', unit: 'pc', step: 1, pack_size: 10, low_at: null }, { cookie: sid });
+  expect(itemRes.status).toBe(200);
+  const itemId = ((await itemRes.json()) as { items: { id: number }[] }).items[0]!.id;
+  await post('/api/presets', { name: 'Breakfast', emoji: '🍳', hour: 8, lines: [{ item_id: itemId, qty: 2 }] }, { cookie: sid });
+
+  const tokRes = await post('/api/tokens', { name: 'iPhone Siri' }, { cookie: sid });
+  expect(tokRes.status).toBe(200);
+  const tokBody = (await tokRes.json()) as { token: string; info: { id: number; name: string; prefix: string; scopes: string }; state: { tokens: unknown[] } };
+  expect(tokBody.token).toMatch(/^mf_/);
+  expect(tokBody.info).toMatchObject({ name: 'iPhone Siri', scopes: 'shortcut' });
+  expect(tokBody.state.tokens).toHaveLength(1);
+  // Plaintext token is not stored in DB
+  expect((db.prepare('SELECT token_hash FROM api_tokens WHERE id = ?').get(tokBody.info.id) as { token_hash: string }).token_hash).toBe(sha256(tokBody.token));
+
+  // Bearer token works WITHOUT cookie and WITHOUT X-MyFood on POST /api/shortcut & GET /api/health
+  const health = await app.request('/api/health', { headers: { Authorization: `Bearer ${tokBody.token}` } });
+  expect(health.status).toBe(200);
+
+  state.now += 5000;
+  const sc = await app.request('/api/shortcut', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokBody.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preset: 'Breakfast' }),
+  });
+  expect(sc.status).toBe(200);
+  expect(await sc.json()).toMatchObject({ ok: true, reply: 'Logged Breakfast' });
+
+  // last_used_at updated
+  const row = db.prepare('SELECT last_used_at FROM api_tokens WHERE id = ?').get(tokBody.info.id) as { last_used_at: number };
+  expect(row.last_used_at).toBe(state.now);
+
+  // Scopes='shortcut' returns 403 on other routes
+  expect((await app.request('/api/state', { headers: { Authorization: `Bearer ${tokBody.token}` } })).status).toBe(403);
+  expect((await app.request('/api/items', { method: 'POST', headers: { Authorization: `Bearer ${tokBody.token}`, 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(403);
+
+  // Invalid bearer token -> 401
+  expect((await app.request('/api/shortcut', { method: 'POST', headers: { Authorization: 'Bearer mf_wrong', 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(401);
+
+  // Revoke token -> 401 afterwards and 404 for unknown token
+  const del = await app.request(`/api/tokens/${tokBody.info.id}`, { method: 'DELETE', headers: { 'X-MyFood': '1', cookie: sid } });
+  expect(del.status).toBe(200);
+  expect(((await del.json()) as { tokens: unknown[] }).tokens).toEqual([]);
+  expect((await app.request('/api/tokens/999', { method: 'DELETE', headers: { 'X-MyFood': '1', cookie: sid } })).status).toBe(404);
+  expect((await app.request('/api/shortcut', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokBody.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preset: 'Breakfast' }),
+  })).status).toBe(401);
+});

@@ -1,6 +1,14 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from 'vitest';
-import { applyOps, computeStock, isLow, shown, toLines } from '../src/shared/stock.ts';
-import { aliasKey, fmtNum, nameKey, parseNum } from '../src/shared/text.ts';
+import { z } from 'zod';
+import { openDb } from '../src/server/db.ts';
+import { addDays, daysUntil, isoDate, isoWeek, weekRange } from '../src/shared/dates.ts';
+import { applyOps, computeDailyNutrition, computeStock, eventNutrition, isExpiringSoon, isLow, portionCount, shown, toLines } from '../src/shared/stock.ts';
+import { aliasKey, fmtCost, fmtNum, nameKey, parseCostCents, parseNum } from '../src/shared/text.ts';
+import { AiResult } from '../src/shared/types.ts';
 import { fixture } from './fixture.ts';
 
 const d = (item_id: number, qty: number) => ({ item_id, qty, is_set: false });
@@ -31,26 +39,72 @@ test('toLines: buy adds, eat removes, adjust sets, level items always set, unkno
   expect(toLines({ kind: 'adjust', lines: [{ item_id: 1, qty: 6 }] }, unit)).toEqual([s(1, 6)]);
 });
 
-test('applyOps shows pending work on top of server state and does not mutate it', () => {
+test('applyOps shows pending work on top of server state and updates nutrition and expenses', () => {
   const eat = { type: 'event' as const, body: { cid: 'pending-0001', at: fixture.now, kind: 'eat' as const, lines: [{ item_id: 1, qty: 2 }] } };
   const out = applyOps(fixture, [eat]);
   expect(out.items.find(i => i.id === 1)!.stock).toBe(5);
   expect(out.events[0]!.cid).toBe('pending-0001');
   expect(out.usual[1]).toBe(2);
   expect(fixture.items.find(i => i.id === 1)!.stock).toBe(7);
+  const today = isoDate(fixture.now);
+  expect(out.daily_nutrition.find(x => x.day === today && x.user_id === 1)).toEqual({ day: today, user_id: 1, kcal: 156, protein_g: 12.6 });
   // once the server lists the event, the pending op adds nothing
   expect(applyOps(out, [eat]).items.find(i => i.id === 1)!.stock).toBe(5);
   // undo of a server event
   const undone = applyOps(fixture, [{ type: 'undo', cid: 'ev-00000003' }]);
   expect(undone.items.find(i => i.id === 6)!.stock).toBe(1000);
   expect(undone.events.some(e => e.cid === 'ev-00000003')).toBe(false);
+  expect(undone.daily_nutrition.find(x => x.day === isoDate(fixture.events[0]!.at) && x.user_id === 2)).toEqual({ day: isoDate(fixture.events[0]!.at), user_id: 2, kcal: 0, protein_g: 0 });
+  // optimistic buy with cost shows in expenses
+  const buy = { type: 'event' as const, body: { cid: 'pending-buy-1', at: fixture.now, kind: 'buy' as const, lines: [{ item_id: 1, qty: 10 }], cost_cents: 3000 } };
+  const bought = applyOps(fixture, [buy]);
+  expect(bought.expenses[0]!.cid).toBe('pending-buy-1');
+  expect(bought.expenses[0]!.cost_cents).toBe(3000);
 });
 
-test('isLow', () => {
+test('isLow and isExpiringSoon', () => {
   expect(isLow({ stock: 2, low_at: 2 })).toBe(true);
   expect(isLow({ stock: 3, low_at: 2 })).toBe(false);
   expect(isLow({ stock: -1, low_at: null })).toBe(true);
   expect(isLow({ stock: 1, low_at: null })).toBe(false);
+
+  const today = isoDate(fixture.now);
+  expect(isExpiringSoon({ stock: 1, expires_at: today }, fixture.now)).toBe(true);
+  expect(isExpiringSoon({ stock: 0, expires_at: today }, fixture.now)).toBe(false);
+  expect(isExpiringSoon({ stock: 1, expires_at: addDays(today, 3) }, fixture.now)).toBe(true);
+  expect(isExpiringSoon({ stock: 1, expires_at: addDays(today, 4) }, fixture.now)).toBe(false);
+});
+
+test('portionCount and eventNutrition / computeDailyNutrition', () => {
+  expect(portionCount({ unit: 'portion', portion_g: null }, 2.5)).toBe(2.5);
+  expect(portionCount({ unit: 'g', portion_g: 300 }, 900)).toBe(3);
+  expect(portionCount({ unit: 'g', portion_g: null }, 500)).toBeNull();
+
+  const cookEat = {
+    kind: 'eat' as const, counts_nutrition: false,
+    lines: [{ item_id: 4, qty: -500, is_set: false }],
+  };
+  expect(eventNutrition(cookEat, fixture.items)).toEqual({ kcal: 0, protein_g: 0 });
+  expect(eventNutrition(fixture.events[1]!, fixture.items)).toEqual({ kcal: 657, protein_g: 40.2 });
+  const agg = computeDailyNutrition(fixture.events, fixture.items);
+  expect(agg.find(d => d.user_id === 1)?.kcal).toBe(657);
+});
+
+test('dates and cost helpers', () => {
+  expect(isoWeek(new Date(2026, 10, 15))).toBe('2026-W46');
+  const r = weekRange('2026-W46')!;
+  expect(r.label).toBe('Nov 9 – Nov 15');
+  expect(r.end - r.start).toBe(7 * 86_400_000);
+  expect(weekRange('2026-W53')?.label).toBe('Dec 28 – Jan 3');
+  expect(weekRange('2025-W53')).toBeNull();
+  expect(daysUntil('2026-11-18', new Date(2026, 10, 15, 22, 0))).toBe(3);
+  expect(addDays('2026-11-15', 4)).toBe('2026-11-19');
+
+  expect(parseCostCents('24,95')).toBe(2495);
+  expect(parseCostCents('100')).toBe(10000);
+  expect(parseCostCents('12.345')).toBeNaN();
+  expect(fmtCost(2495, 'kr')).toBe('24.95 kr');
+  expect(fmtCost(10000, 'kr')).toBe('100 kr');
 });
 
 test('text helpers', () => {
@@ -60,4 +114,70 @@ test('text helpers', () => {
   expect(parseNum('2')).toBe(2);
   expect(parseNum('abc')).toBeNaN();
   expect(fmtNum(0.1 + 0.2)).toBe('0.3');
+});
+
+test('AiResult produces a valid JSON schema and parses both legacy and v2 outputs', () => {
+  const schema = z.toJSONSchema(AiResult) as { type?: string };
+  expect(schema.type).toBe('object');
+  expect(AiResult.safeParse({
+    reply: 'Logged breakfast.',
+    events: [{ kind: 'eat', preset_id: 1, lines: [{ item_id: 1, new_item: null, qty: 3, raw: null }] }],
+  }).success).toBe(true);
+  expect(AiResult.safeParse({
+    reply: 'Cooked Bolognese.',
+    events: [],
+    cook: [{
+      meal_item_id: null, name: 'Bolognese', emoji: '🍝', portions: 4, total_g: 1200,
+      expires_in_days: 4, owner: 'shared', kcal_total: 1680, protein_total: 108,
+      ingredients: [{ item_id: 4, qty: 500 }],
+    }],
+  }).success).toBe(true);
+});
+
+test('openDb migrates an existing v1 database idempotently without losing rows', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mf-mig-'));
+  const file = join(dir, 'myfood.db');
+  try {
+    const raw = new DatabaseSync(file);
+    raw.exec(`
+      CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, emoji TEXT NOT NULL, code_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+      CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL);
+      CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE, emoji TEXT NOT NULL, category TEXT NOT NULL, unit TEXT NOT NULL, step REAL NOT NULL, pack_size REAL NOT NULL, low_at REAL, archived_at INTEGER, created_at INTEGER NOT NULL);
+      CREATE TABLE aliases (text TEXT PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id));
+      CREATE TABLE events (cid TEXT PRIMARY KEY, seq INTEGER NOT NULL UNIQUE, user_id INTEGER NOT NULL REFERENCES users(id), at INTEGER NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL, note TEXT, preset_id INTEGER, job_id INTEGER, undone_at INTEGER);
+      CREATE TABLE event_lines (event_cid TEXT NOT NULL REFERENCES events(cid) ON DELETE CASCADE, item_id INTEGER NOT NULL REFERENCES items(id), qty REAL NOT NULL, is_set INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE presets (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), name TEXT NOT NULL, emoji TEXT NOT NULL, hour REAL NOT NULL);
+      CREATE TABLE preset_lines (preset_id INTEGER NOT NULL REFERENCES presets(id) ON DELETE CASCADE, item_id INTEGER NOT NULL REFERENCES items(id), qty REAL NOT NULL, PRIMARY KEY (preset_id, item_id));
+      CREATE TABLE jobs (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), text TEXT NOT NULL, images TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, result TEXT, error TEXT, event_cids TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL, finished_at INTEGER, dismissed_at INTEGER);
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO meta(key, value) VALUES ('rev', '7');
+      INSERT INTO users(id, name, emoji, code_hash, created_at) VALUES (1, 'Sam', '🦊', 'hash1', 100), (2, 'Robin', '🐻', 'hash2', 100);
+      INSERT INTO items(id, name, name_key, emoji, category, unit, step, pack_size, low_at, created_at) VALUES (1, 'Eggs', 'eggs', '🥚', 'dairy', 'pc', 1, 10, 3, 100);
+      INSERT INTO aliases(text, item_id) VALUES ('oko aeg', 1);
+      INSERT INTO events(cid, seq, user_id, at, kind, source) VALUES ('c1', 1, 1, 200, 'buy', 'manual');
+      INSERT INTO event_lines(event_cid, item_id, qty, is_set) VALUES ('c1', 1, 10, 0);
+    `);
+    raw.close();
+
+    const db = openDb(file);
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
+    expect(db.prepare('SELECT id, name, owner_id, is_cooked FROM items').get()).toEqual({ id: 1, name: 'Eggs', owner_id: null, is_cooked: 0 });
+    expect(db.prepare('SELECT text, item_id FROM aliases').get()).toEqual({ text: 'oko aeg', item_id: 1 });
+    expect(db.prepare('SELECT cid, counts_nutrition FROM events').get()).toEqual({ cid: 'c1', counts_nutrition: 1 });
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+
+    // Shared item duplicate still fails, personal items per user succeed
+    expect(() => db.prepare("INSERT INTO items(name, name_key, emoji, category, unit, step, pack_size, owner_id, created_at) VALUES ('Eggs', 'eggs', '🥚', 'dairy', 'pc', 1, 10, NULL, 1)").run()).toThrow();
+    db.prepare("INSERT INTO items(name, name_key, emoji, category, unit, step, pack_size, owner_id, created_at) VALUES ('Eggs', 'eggs', '🥚', 'dairy', 'pc', 1, 10, 1, 1)").run();
+    db.prepare("INSERT INTO items(name, name_key, emoji, category, unit, step, pack_size, owner_id, created_at) VALUES ('Eggs', 'eggs', '🥚', 'dairy', 'pc', 1, 10, 2, 1)").run();
+    expect(() => db.prepare("INSERT INTO items(name, name_key, emoji, category, unit, step, pack_size, owner_id, created_at) VALUES ('Eggs', 'eggs', '🥚', 'dairy', 'pc', 1, 10, 1, 1)").run()).toThrow();
+    db.close();
+
+    // Re-opening migrated DB is idempotent
+    const db2 = openDb(file);
+    expect(db2.prepare('SELECT COUNT(*) AS n FROM items').get()).toEqual({ n: 3 });
+    db2.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

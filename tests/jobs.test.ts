@@ -5,7 +5,10 @@ import { beforeEach, expect, test } from 'vitest';
 import { sha256 } from '../src/server/auth.ts';
 import { openDb } from '../src/server/db.ts';
 import type { Db } from '../src/server/db.ts';
+import { runShortcutAi } from '../src/server/jobs.ts';
+import type { PushSender } from '../src/server/push.ts';
 import { createApp } from '../src/server/routes.ts';
+import { addDays, isoDate } from '../src/shared/dates.ts';
 import type { AiInput, AiResult, State } from '../src/shared/types.ts';
 
 let app: ReturnType<typeof createApp>;
@@ -14,6 +17,10 @@ let dataDir: string;
 let sid: string;
 let calls: AiInput[];
 let answer: (input: AiInput) => Promise<AiResult>;
+let pushes: { endpoint: string; title: string; body: string }[];
+const sendPush: PushSender = async (sub, payload) => {
+  pushes.push({ endpoint: sub.endpoint, title: payload.title, body: payload.body });
+};
 
 const line = (item_id: number | null, qty: number, extra: object = {}) => ({ item_id, new_item: null, qty, raw: null, ...extra });
 const eventOf = (kind: string, lines: object[], preset_id: number | null = null) => ({ kind, preset_id, lines });
@@ -26,9 +33,10 @@ async function state(): Promise<State> { return (await app.request('/api/state',
 async function api(method: string, path: string, body?: unknown) {
   return app.request(path, { method, headers: { ...headers(), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
 }
-async function submit(text: string, images = 0) {
+async function submit(text: string, images = 0, mode?: string) {
   const fd = new FormData();
   fd.append('text', text);
+  if (mode) fd.append('mode', mode);
   for (let i = 0; i < images; i++) fd.append('images', new File([PNG], `r${i}.png`, { type: 'image/png' }));
   return app.request('/api/jobs', { method: 'POST', headers: headers(), body: fd });
 }
@@ -49,8 +57,9 @@ beforeEach(async () => {
   db.prepare('INSERT INTO users(name, emoji, code_hash, created_at) VALUES (?, ?, ?, 0)').run('Bob', '🐻', sha256('bbbb-bbbb-bbbb'));
   dataDir = mkdtempSync(join(tmpdir(), 'mf-'));
   calls = [];
+  pushes = [];
   answer = reply([]);
-  app = createApp({ db, runAi: input => { calls.push(input); return answer(input); }, dataDir, build: 't', webDir: '/nonexistent' });
+  app = createApp({ db, runAi: input => { calls.push(input); return answer(input); }, dataDir, build: 't', webDir: '/nonexistent', sendPush });
   const r = await app.request('/api/login', { method: 'POST', headers: { 'X-MyFood': '1' }, body: JSON.stringify({ code: 'aaaa-aaaa-aaaa' }) });
   sid = r.headers.get('set-cookie')!.split(';')[0]!;
   await api('POST', '/api/items', { name: 'Eggs', emoji: '🥚', category: 'dairy', unit: 'pc', step: 1, pack_size: 10, low_at: 3 });
@@ -299,4 +308,186 @@ test('a text job gets a working folder for the AI process, removed afterwards', 
   await settle();
   expect(existed).toBe(true);
   expect(readdirSync(join(dataDir, 'jobs'))).toEqual([]);
+});
+
+test('audit mode includes stock & expiry in context, applies adjust with source=audit, and skips aliases', async () => {
+  const eggs = eggsId(await state());
+  const today = isoDate(Date.now());
+  const exp10 = addDays(today, 10);
+  await api('PATCH', `/api/items/${eggs}`, { expires_at: exp10 });
+  await api('POST', '/api/events', { cid: 'seed-audit-1', at: 1, kind: 'buy', lines: [{ item_id: eggs, qty: 10 }] });
+  db.prepare('INSERT INTO aliases(text, item_id) VALUES (?, ?)').run('oko aeg 10', eggs);
+
+  answer = reply([eventOf('adjust', [line(eggs, 4, { raw: 'half carton in fridge', expires_in_days: 3 })])]);
+  expect((await submit('check fridge', 1, 'audit')).status).toBe(200);
+  let s = await settle();
+  const job = s.jobs[0]!;
+  expect(job).toMatchObject({ mode: 'audit', status: 'review', has_images: true });
+  expect(calls[0]!.context.mode).toBe('audit');
+  expect(calls[0]!.context.aliases).toEqual([]);
+  expect(calls[0]!.context.items[0]).toMatchObject({ id: eggs, stock: 10, expires_at: exp10 });
+
+  s = await (await api('POST', `/api/jobs/${job.id}/apply`, { events: job.result!.events })).json();
+  expect(s.jobs[0]!.status).toBe('done');
+  expect(s.items[0]!.stock).toBe(4);
+  expect(s.items[0]!.expires_at).toBe(addDays(today, 3));
+  expect(s.events[0]!.source).toBe('audit');
+  expect(db.prepare('SELECT text FROM aliases').all()).toEqual([{ text: 'oko aeg 10' }]);
+});
+
+test('receipt buy converts price, total_cost, expires_in_days, and new_item owner & macros', async () => {
+  const eggs = eggsId(await state());
+  const today = isoDate(Date.now());
+  answer = async () => ({
+    reply: 'Logged receipt.',
+    events: [{
+      kind: 'buy',
+      preset_id: null,
+      total_cost: 60.5,
+      lines: [
+        line(eggs, 10, { raw: 'ÆG', price: 29, expires_in_days: 21 }),
+        line(null, 250, {
+          raw: 'SMØR',
+          price: 31.5,
+          expires_in_days: 30,
+          new_item: { ...butter, owner: 'mine', kcal_per_unit: 7.17, protein_per_unit: 0.008, expires_in_days: 30 },
+        }),
+      ],
+    }],
+  });
+  await submit('rema', 1, 'receipt');
+  let s = await settle();
+  const job = s.jobs[0]!;
+  s = await (await api('POST', `/api/jobs/${job.id}/apply`, { events: job.result!.events })).json();
+
+  const eggsItem = s.items.find(i => i.name === 'Eggs')!;
+  const butterItem = s.items.find(i => i.name === 'Butter')!;
+  expect(eggsItem.expires_at).toBe(addDays(today, 21));
+  expect(butterItem).toMatchObject({ owner_id: 1, kcal_per_unit: 7.17, protein_per_unit: 0.008, expires_at: addDays(today, 30) });
+  expect(s.events[0]!.cost_cents).toBe(6050);
+  expect(s.events[0]!.lines[0]).toMatchObject({ cost_cents: 2900, expires_at: addDays(today, 21) });
+  expect(s.events[0]!.lines[1]).toMatchObject({ cost_cents: 3150, expires_at: addDays(today, 30) });
+});
+
+test('cook batch auto-applies on text job and applies on reviewed image job', async () => {
+  await api('POST', '/api/items', { name: 'Beef', emoji: '🥩', category: 'meat', unit: 'g', step: 50, pack_size: 500, low_at: null, kcal_per_unit: 2, protein_per_unit: 0.2 });
+  let s = await state();
+  const beef = s.items.find(i => i.name === 'Beef')!.id;
+  await api('POST', '/api/events', { cid: 'seed-beef-1', at: 1, kind: 'buy', lines: [{ item_id: beef, qty: 1000 }] });
+
+  answer = async () => ({
+    reply: 'Cooked 4 portions of chili.',
+    events: [],
+    cook: [{
+      meal_item_id: null,
+      name: 'Chili',
+      emoji: '🍲',
+      portions: 4,
+      total_g: 1200,
+      expires_in_days: 4,
+      owner: 'mine',
+      kcal_total: null,
+      protein_total: null,
+      ingredients: [{ item_id: beef, qty: 500 }],
+    }],
+  });
+  await submit('cooked 4 portions of chili 1200g with 500g beef');
+  s = await settle();
+  expect(s.jobs[0]!.status).toBe('done');
+  expect(s.jobs[0]!.event_cids).toHaveLength(2);
+  expect(s.items.find(i => i.name === 'Beef')!.stock).toBe(500);
+  const chili = s.items.find(i => i.name === 'Chili')!;
+  expect(chili).toMatchObject({ is_cooked: true, unit: 'g', portion_g: 300, stock: 1200, owner_id: 1 });
+  expect(chili.kcal_per_unit).toBeCloseTo(1000 / 1200, 2);
+
+  // Also test cook in reviewed image job apply (re-cooking with owner: null preserves existing personal owner_id)
+  answer = async () => ({
+    reply: 'Cooked another batch.',
+    events: [],
+    cook: [{
+      meal_item_id: chili.id,
+      name: null,
+      emoji: null,
+      portions: 2,
+      total_g: 600,
+      expires_in_days: 4,
+      owner: null,
+      kcal_total: 600,
+      protein_total: 48,
+      ingredients: [],
+    }],
+  });
+  await submit('photo of pot', 1);
+  s = await settle();
+  const revJob = s.jobs[0]!;
+  expect(revJob.status).toBe('review');
+  s = await (await api('POST', `/api/jobs/${revJob.id}/apply`, { events: revJob.result!.events, cook: revJob.result!.cook })).json();
+  expect(s.items.find(i => i.id === chili.id)).toMatchObject({ stock: 1800, owner_id: 1 });
+});
+
+test('AiLine unit="portion" converts with portion_g and rejects incompatible unit mismatches', async () => {
+  await api('POST', '/api/items', {
+    name: 'Stew', emoji: '🍲', category: 'meals', unit: 'g', step: 50, pack_size: 1200,
+    low_at: null, is_cooked: true, portion_g: 300,
+  });
+  let s = await state();
+  const eggs = eggsId(s);
+  const stew = s.items.find(i => i.name === 'Stew')!.id;
+  await api('POST', '/api/events', { cid: 'seed-stew-1', at: 1, kind: 'buy', lines: [{ item_id: stew, qty: 1200 }] });
+
+  answer = reply([eventOf('eat', [line(stew, 2, { unit: 'portion' })])]);
+  await submit('ate 2 portions of stew');
+  s = await settle();
+  expect(s.jobs[0]!.status).toBe('done');
+  expect(s.items.find(i => i.id === stew)!.stock).toBe(600);
+
+  answer = reply([eventOf('eat', [line(eggs, 1, { unit: 'portion' })])]);
+  await submit('ate 1 portion of eggs');
+  s = await settle();
+  expect(s.jobs[0]!.status).toBe('failed');
+  expect(s.jobs[0]!.error).toContain('Incompatible unit');
+});
+
+test('job triggers low-stock push notification when crossing threshold', async () => {
+  const eggs = eggsId(await state());
+  await api('POST', '/api/events', { cid: 'seed-push-1', at: 1, kind: 'buy', lines: [{ item_id: eggs, qty: 5 }] });
+  await api('POST', '/api/push/subscribe', {
+    endpoint: 'https://push.example/alice',
+    keys: { p256dh: 'BTestKey0000000000000000', auth: 'authsecret12' },
+  });
+
+  answer = reply([eventOf('eat', [line(eggs, 3)])]);
+  await submit('ate 3 eggs');
+  await settle();
+  await new Promise(r => setTimeout(r, 20));
+  expect(pushes).toHaveLength(1);
+  expect(pushes[0]!.body).toContain('Eggs');
+});
+
+test('runShortcutAi logs shortcut event synchronously and returns integer event_ids', async () => {
+  const eggs = eggsId(await state());
+  await api('POST', '/api/events', { cid: 'seed-sc-1', at: 1, kind: 'buy', lines: [{ item_id: eggs, qty: 10 }] });
+
+  const jobsDir = join(dataDir, 'jobs');
+  const res = await runShortcutAi(
+    db,
+    {
+      runAi: async (input) => {
+        expect(existsSync(input.dir)).toBe(true);
+        return { reply: 'Logged 2 eggs.', events: [eventOf('eat', [line(eggs, 2)])] } as AiResult;
+      },
+      jobsDir,
+      now: () => 5_000_000,
+      sendPush,
+    },
+    1,
+    'ate 2 eggs',
+  );
+  expect(res.reply).toBe('Logged 2 eggs.');
+  expect(res.event_ids).toHaveLength(1);
+  expect(Number.isInteger(res.event_ids[0])).toBe(true);
+  const s = await state();
+  expect(s.items.find(i => i.id === eggs)!.stock).toBe(8);
+  expect(s.events[0]!.source).toBe('shortcut');
+  expect(readdirSync(jobsDir)).toEqual([]);
 });
