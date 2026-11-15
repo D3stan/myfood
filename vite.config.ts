@@ -1,10 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const apiPort = Number(process.env.API_PORT ?? process.env.PORT ?? 3000);
+
 export default defineConfig({
   root: 'src/web',
   build: { outDir: '../../dist/web', emptyOutDir: true },
-  server: { proxy: { '/api': 'http://127.0.0.1:3000' } },
+  server: { proxy: { '/api': `http://127.0.0.1:${apiPort}` } },
   test: { root: '.', include: ['tests/**/*.test.ts'] },
   plugins: [
     VitePWA({

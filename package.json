@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev:server": "node --watch src/server/main.ts",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "node src/server/main.ts",
     "dev:web": "vite",
     "build": "tsc --noEmit && vite build",
     "start": "node src/server/main.ts",
