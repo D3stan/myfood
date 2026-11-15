@@ -1,0 +1,9 @@
+/* Same ink-on-paper palette as fit-or-pivot. */
+:root{
+  --ink:#1d1a16; --paper:#ece2c6; --card:#fbf5e4; --muted:#5d5446; --line:#1d1a16;
+  --red:#d9412b; --red-bg:#f6cfc4; --gold:#f2b632; --green:#2e7d3a; --green-bg:#cde6c0; --blue:#2b5fa8; --note:#fff27a;
+  --sh:4px 4px 0 var(--ink); --sh-s:3px 3px 0 var(--ink); --sh-l:6px 6px 0 var(--ink);
+  --wob:3px 10px 4px 12px/10px 3px 12px 4px;
+  --tabbar:64px; --composer:60px;
+  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+}
