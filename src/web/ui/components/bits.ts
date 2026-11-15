@@ -1,3 +1,4 @@
+import { daysUntil } from '../../../shared/dates.ts';
 import { fmtNum } from '../../../shared/text.ts';
 import type { EventLine, FoodEvent, Item, Kind, State } from '../../../shared/types.ts';
 import type { Ui } from '../../store.ts';
@@ -20,7 +21,17 @@ export const lineText = (items: Item[], l: EventLine): string => {
 };
 
 export const userOf = (st: State, ev: FoodEvent) => st.users.find(u => u.id === ev.user_id);
+export const ownerOf = (st: State, ownerId: number | null) => (ownerId == null ? undefined : st.users.find(u => u.id === ownerId));
 export const clock = (t: number): string => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+export function expiryLabel(expiresAt: string | null, now: number | Date = Date.now()): string | null {
+  if (!expiresAt) return null;
+  const d = daysUntil(expiresAt, now);
+  if (!Number.isFinite(d)) return null;
+  if (d < 0) return 'Expired';
+  if (d === 0) return 'Today';
+  return `${d}d`;
+}
 
 const pad = (n: number): string => String(n).padStart(2, '0');
 export const hourToTime = (h: number): string => { const m = Math.round(h * 60) % 1440; return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`; };

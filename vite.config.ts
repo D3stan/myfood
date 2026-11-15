@@ -13,9 +13,12 @@ export default defineConfig(({ command }) => {
   plugins: [
     { name: 'build-id', generateBundle() { this.emitFile({ type: 'asset', fileName: 'build.txt', source: build }); } },
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: '.',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       includeAssets: ['apple-touch-icon.png', 'favicon.svg'],
-      workbox: { globPatterns: ['**/*.{js,css,html,woff2,png,svg}'], navigateFallbackDenylist: [/^\/api\//] },
+      injectManifest: { globPatterns: ['**/*.{js,css,html,woff2,png,svg}'] },
       manifest: {
         name: 'MyFood',
         short_name: 'MyFood',

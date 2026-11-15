@@ -17,6 +17,9 @@ s.server = saved.server;
 s.pending = saved.pending;
 s.ui.online = navigator.onLine;
 s.ui.standalone = (navigator as Navigator & { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
+s.ui.pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+s.ui.pushPermission = s.ui.pushSupported ? Notification.permission : 'unsupported';
+s.ui.scannerSupported = 'BarcodeDetector' in window;
 
 // `npx vite` alone: ?fixture serves tests/fixture.ts and applies events locally.
 const fixture = import.meta.env.DEV && location.search.includes('fixture');
@@ -34,7 +37,18 @@ if (import.meta.env.DEV && fixture) {
 // A newer build is deployed: update the service worker and reload once, when no sheet is open.
 let reg: ServiceWorkerRegistration | undefined;
 let updating = false;
-if (!fixture) registerSW({ immediate: true, onRegisteredSW: (_url, r) => { reg = r; } });
+async function syncPushState(r?: ServiceWorkerRegistration): Promise<void> {
+  if (!s.ui.pushSupported) return;
+  s.ui.pushPermission = Notification.permission;
+  const activeReg = r ?? reg ?? (await navigator.serviceWorker?.getRegistration().catch(() => undefined));
+  if (!activeReg?.pushManager) return;
+  const sub = await activeReg.pushManager.getSubscription().catch(() => null);
+  if (s.server && s.server.push_subscribed !== !!sub) {
+    s.server = { ...s.server, push_subscribed: !!sub };
+    commit();
+  }
+}
+if (!fixture) registerSW({ immediate: true, onRegisteredSW: (_url, r) => { reg = r; void syncPushState(r); } });
 hooks.state = async () => {
   const b = s.server?.build;
   if (!b || b === 'dev' || __BUILD__ === 'dev' || b === __BUILD__ || s.ui.sheet || updating) return;
@@ -56,8 +70,8 @@ commit();
 void refresh();
 void pump();
 
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void refresh(); void pump(); } });
-addEventListener('focus', () => void pump());
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void refresh(); void pump(); void syncPushState(); } });
+addEventListener('focus', () => { void pump(); void syncPushState(); });
 addEventListener('online', () => { s.ui.online = true; commit(); void pump(); void refresh(); });
 addEventListener('offline', () => { s.ui.online = false; commit(); });
 

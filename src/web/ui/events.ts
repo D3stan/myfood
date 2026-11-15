@@ -1,5 +1,6 @@
 // Delegated listeners: data-a = action on click, data-c = action on change, data-f = a text field, data-submit = a form.
 import { actions, commit, toast } from './actions.ts';
+import { stopScanner } from './components/barcode.ts';
 import { closeSheet, store as s } from '../store.ts';
 
 async function run(name: string | undefined, el: HTMLElement): Promise<void> {
@@ -19,12 +20,16 @@ export function wire(): void {
   const store = (e: Event): void => {
     const el = hit(e, '[data-f]') as HTMLInputElement | null;
     if (!el) return;
-    s.ui.f[el.dataset.f!] = el.value;
-    if (el.dataset.f === 'search') commit();
+    s.ui.f[el.dataset.f!] = el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value;
+    if (el.dataset.f === 'search' || el.dataset.f === 'cookPortions' || el.dataset.f === 'cookGrams') commit();
   };
   document.addEventListener('input', store);
   document.addEventListener('change', e => {
     store(e);
+    const fEl = hit(e, '[data-f]') as HTMLInputElement | null;
+    if (fEl?.dataset.f === 'notifyLow' || fEl?.dataset.f === 'notifyExpiry') {
+      void run('saveNotify', fEl);
+    }
     const el = hit(e, '[data-c]');
     if (el) void run(el.dataset.c, el);
   });
@@ -40,7 +45,7 @@ export function wire(): void {
   });
   document.addEventListener('keydown', e => {
     const el = e.target as HTMLElement;
-    if (e.key === 'Escape' && s.ui.sheet) { closeSheet(s); commit(); }
+    if (e.key === 'Escape' && s.ui.sheet) { stopScanner(s); closeSheet(s); commit(); }
     else if (e.key === 'Enter' && el.dataset?.c === 'num') (el as HTMLInputElement).blur();
     else if ((e.key === 'Enter' || e.key === ' ') && el.getAttribute?.('role') === 'button' && el.tagName !== 'LABEL') { e.preventDefault(); el.click(); }
   });

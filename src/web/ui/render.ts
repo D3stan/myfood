@@ -3,20 +3,26 @@ import { html, htmlToString } from '../html.ts';
 import type { Html } from '../html.ts';
 import { view } from '../store.ts';
 import type { Store } from '../store.ts';
-import { composer, tabbar, toast } from './components/nav.ts';
+import { barcodeSheet } from './components/barcode.ts';
 import { composeSheet, reviewSheet } from './components/compose.ts';
-import { eventSheet, itemFormSheet, itemSheet, presetEditSheet, presetSheet } from './components/sheets.ts';
+import { cookSheet } from './components/cook.ts';
+import { composer, tabbar, toast } from './components/nav.ts';
+import { eventSheet, expenseSheet, itemFormSheet, itemSheet, presetEditSheet, presetSheet } from './components/sheets.ts';
 import { history } from './screens/history.ts';
 import { login } from './screens/login.ts';
 import { me } from './screens/me.ts';
 import { pantry } from './screens/pantry.ts';
+import { spend } from './screens/spend.ts';
 
 // Pure: state in, HTML string out (so tests need no DOM).
 export function appHtml(s: Store, now = new Date()): string {
   const st = view(s);
   const out: Html = !st
     ? (s.ui.loggedOut ? login(s.ui) : html`<p class="center muted" style="margin-top:30vh">Loading…</p>`)
-    : html`${s.ui.tab === 'pantry' ? pantry({ st, ui: s.ui }, now) : s.ui.tab === 'history' ? history({ st, ui: s.ui }) : me({ st, ui: s.ui })}${composer()}${tabbar(s.ui.tab)}`;
+    : html`${s.ui.tab === 'pantry' ? pantry({ st, ui: s.ui }, now)
+        : s.ui.tab === 'spend' ? spend({ st, ui: s.ui }, now)
+        : s.ui.tab === 'history' ? history({ st, ui: s.ui })
+        : me({ st, ui: s.ui })}${composer()}${tabbar(s.ui.tab)}`;
   return htmlToString(out);
 }
 
@@ -24,7 +30,11 @@ export function sheetHtml(s: Store): string {
   const st = view(s), sh = s.ui.sheet;
   if (!st || !sh) return '';
   const v = { st, ui: s.ui };
-  const body = { item: itemSheet, preset: presetSheet, presetEdit: presetEditSheet, itemForm: itemFormSheet, compose: composeSheet, review: reviewSheet, event: eventSheet }[sh.t];
+  const body = {
+    item: itemSheet, preset: presetSheet, presetEdit: presetEditSheet, itemForm: itemFormSheet,
+    compose: composeSheet, review: reviewSheet, event: eventSheet,
+    cook: cookSheet, barcode: barcodeSheet, expense: expenseSheet,
+  }[sh.t];
   return htmlToString(body(v, sh));
 }
 

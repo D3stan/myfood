@@ -1,12 +1,12 @@
 // One store, plain data. What is shown is always applyOps(server, pending).
 // Functions take the store as their first argument so they can be tested without a DOM.
 import { applyOps } from '../shared/stock.ts';
-import type { AiEvent, EventBody, PendingOp, State } from '../shared/types.ts';
+import type { AiCook, AiEvent, BarcodeLookup, EventBody, JobMode, PendingOp, State } from '../shared/types.ts';
 
-export type Tab = 'pantry' | 'history' | 'me';
+export type Tab = 'pantry' | 'spend' | 'history' | 'me';
 
 export interface Sheet {
-  t: 'item' | 'preset' | 'presetEdit' | 'itemForm' | 'compose' | 'review' | 'event';
+  t: 'item' | 'preset' | 'presetEdit' | 'itemForm' | 'compose' | 'review' | 'event' | 'cook' | 'barcode' | 'expense';
   id?: number | string;
   /** Quantities being edited, keyed by item id ("main" in the item sheet). Review lines live in `events`. */
   q: Record<string, number>;
@@ -15,6 +15,14 @@ export interface Sheet {
   /** review: the proposal being edited, and the untouched copy (to switch a line back to "new"). */
   events?: AiEvent[];
   orig?: AiEvent[];
+  cook?: AiCook[];
+  origCook?: AiCook[];
+  /** compose: job mode ('auto' | 'receipt' | 'audit'). */
+  mode?: JobMode;
+  /** item: true = step in portions when item has portion_g, false = step in grams. */
+  portionMode?: boolean;
+  /** cook: ingredient lines being prepared. */
+  ingredients?: { item_id: number; qty: number }[];
   more?: boolean;
   busy?: boolean;
 }
@@ -32,6 +40,16 @@ export interface Ui {
   standalone: boolean;
   files: { file: File; url: string }[];
   seenDone: Set<number>;
+  ownerFilter: 'all' | 'mine' | 'shared';
+  historyScope: 'me' | 'all';
+  jobMode: JobMode;
+  barcodeLookup: BarcodeLookup | null;
+  barcodeBusy: boolean;
+  scannerActive: boolean;
+  scannerSupported: boolean;
+  newToken: string | null;
+  pushSupported: boolean;
+  pushPermission: NotificationPermission | 'unsupported';
 }
 
 export interface Store {
@@ -45,7 +63,13 @@ export interface Store {
 
 export const newStore = (server: State | null = null, pending: PendingOp[] = []): Store => ({
   server, pending, inflight: new Set(), flushing: false,
-  ui: { tab: 'pantry', sheet: null, f: {}, editing: null, toast: null, online: true, loggedOut: false, standalone: true, files: [], seenDone: new Set() },
+  ui: {
+    tab: 'pantry', sheet: null, f: {}, editing: null, toast: null,
+    online: true, loggedOut: false, standalone: true, files: [], seenDone: new Set(),
+    ownerFilter: 'all', historyScope: 'me', jobMode: 'auto',
+    barcodeLookup: null, barcodeBusy: false, scannerActive: false, scannerSupported: false,
+    newToken: null, pushSupported: false, pushPermission: 'default',
+  },
 });
 
 export const store: Store = newStore();
@@ -87,7 +111,14 @@ export function openSheet(s: Store, sheet: Sheet, fields: Record<string, string>
   s.ui.editing = null;
   s.ui.f = { ...s.ui.f, ...fields };
 }
-export function closeSheet(s: Store): void { s.ui.sheet = null; s.ui.editing = null; }
+
+export function closeSheet(s: Store): void {
+  s.ui.sheet = null;
+  s.ui.editing = null;
+  s.ui.barcodeLookup = null;
+  s.ui.barcodeBusy = false;
+  s.ui.scannerActive = false;
+}
 
 /** Closes a sheet whose subject no longer exists (archived item, undone event, applied job). */
 export function pruneSheet(s: Store): void {

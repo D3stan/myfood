@@ -1,7 +1,12 @@
 import { html } from '../../html.ts';
 import type { Tab, Ui } from '../../store.ts';
 
-const TABS: [Tab, string, string][] = [['pantry', '🥫', 'Pantry'], ['history', '📜', 'History'], ['me', '🙂', 'Me']];
+const TABS: [Tab, string, string][] = [
+  ['pantry', '🥫', 'Pantry'],
+  ['spend', '💸', 'Spend'],
+  ['history', '📜', 'History'],
+  ['me', '🙂', 'Me'],
+];
 
 export const tabbar = (tab: Tab) => html`<nav class="tabbar" aria-label="Tabs">${TABS.map(([t, e, l]) =>
   html`<button id="tab-${t}" class="${tab === t ? 'on' : ''}" data-a="tab" data-tab="${t}" aria-current="${tab === t ? 'page' : 'false'}"><span class="e">${e}</span>${l}</button>`)}</nav>`;
