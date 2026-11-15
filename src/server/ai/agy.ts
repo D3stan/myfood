@@ -75,8 +75,12 @@ export async function runAi(input: AiInput): Promise<AiResult> {
   }
 
   const res = AiResult.safeParse(structured);
-  // The contract says exactly one of item_id / new_item per line; zod alone does not check that.
-  if (!res.success || res.data.events.some((e) => e.lines.some((l) => (l.item_id === null) === (l.new_item === null)))) {
+  // The contract says exactly one of item_id / new_item per line, and cook needs portions or total_g plus a name if new.
+  if (
+    !res.success ||
+    res.data.events.some((e) => e.lines.some((l) => (l.item_id === null) === (l.new_item === null))) ||
+    res.data.cook?.some((c) => (c.portions === null && c.total_g === null) || (c.meal_item_id === null && !c.name))
+  ) {
     return fail(E.nonsense);
   }
   return res.data;
