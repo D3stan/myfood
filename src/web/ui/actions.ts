@@ -8,7 +8,7 @@ import { clear, flush, save } from '../outbox.ts';
 import { closeSheet, enqueueEvent, enqueueUndo, openSheet, qOf, receive, setQ, stepQ, store as s, view } from '../store.ts';
 import type { Sheet, Tab } from '../store.ts';
 import { ISO_DATE_RE, addDays, isoDate, parseIsoDate } from '../../shared/dates.ts';
-import { isLow } from '../../shared/stock.ts';
+import { isLow, shown } from '../../shared/stock.ts';
 import { fmtNum, nameKey, parseCostCents, parseNum } from '../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../shared/types.ts';
 import type { Category, Item, Kind, LineIn, PendingOp, State, Unit } from '../../shared/types.ts';
@@ -171,6 +171,38 @@ export const visibleLowItems = (v: State): Item[] =>
 export const findCreatedItem = (items: Item[], name: string, ownerId: number | null): Item | undefined =>
   items.find(i => nameKey(i.name) === nameKey(name) && i.owner_id === ownerId);
 
+/** Builds a confirmation prompt when eating/consuming lines would take any item below zero, or null if all stay >= 0. */
+export function overdrawWarning(v: State, lines: { item_id: number; qty: number }[]): string | null {
+  const needed = new Map<number, number>();
+  for (const l of lines) {
+    if (!(l.qty > 0)) continue;
+    needed.set(l.item_id, (needed.get(l.item_id) ?? 0) + l.qty);
+  }
+  const warnings: string[] = [];
+  for (const [itemId, qty] of needed) {
+    const it = v.items.find(i => i.id === itemId);
+    if (!it || it.unit === 'level') continue;
+    const after = Math.round((it.stock - qty) * 1000) / 1000;
+    if (after >= 0) continue;
+    const owed = shown(-after);
+    if (it.stock > 0) {
+      warnings.push(`${it.name} only has ${fmtNum(shown(it.stock))} ${it.unit} left (taking ${fmtNum(qty)} ${it.unit} will leave ${fmtNum(owed)} ${it.unit} owed)`);
+    } else if (it.stock < 0) {
+      warnings.push(`${it.name} is already out (${fmtNum(shown(-it.stock))} ${it.unit} owed; taking ${fmtNum(qty)} ${it.unit} will leave ${fmtNum(owed)} ${it.unit} owed)`);
+    } else {
+      warnings.push(`${it.name} is out of stock (taking ${fmtNum(qty)} ${it.unit} will leave ${fmtNum(owed)} ${it.unit} owed)`);
+    }
+  }
+  if (!warnings.length) return null;
+  if (warnings.length === 1) return `${warnings[0]}. Proceed anyway?`;
+  return `This will overdraw:\n• ${warnings.join('\n• ')}\nProceed anyway?`;
+}
+
+function confirmOverdraw(v: State, lines: { item_id: number; qty: number }[]): boolean {
+  const msg = overdrawWarning(v, lines);
+  return msg == null || (globalThis.confirm?.(msg) ?? true);
+}
+
 export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   rerender: () => {},
   tab: el => { stopScanner(s); s.ui.tab = el.dataset.tab as Tab; window.scrollTo(0, 0); },
@@ -267,11 +299,15 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
   // pantry
   take: el => {
     const it = item(el.dataset.id)!, q = st().usual[it.id] ?? it.step;
-    logged('eat', [{ item_id: it.id, qty: q }], ate(it, q));
+    const lines = [{ item_id: it.id, qty: q }];
+    if (!confirmOverdraw(st(), lines)) return;
+    logged('eat', lines, ate(it, q));
   },
   heroLog: el => {
     const p = st().presets.find(x => x.id === Number(el.dataset.id))!;
-    logged('eat', p.lines.map(l => ({ item_id: l.item_id, qty: l.qty })), `Logged ${p.name}`, { preset_id: p.id, note: p.name });
+    const lines = p.lines.map(l => ({ item_id: l.item_id, qty: l.qty }));
+    if (!confirmOverdraw(st(), lines)) return;
+    logged('eat', lines, `Logged ${p.name}`, { preset_id: p.id, note: p.name });
   },
   dismissJob: el => mutate('DELETE', `/api/jobs/${el.dataset.id}`),
 
@@ -289,7 +325,9 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
   eat: () => {
     const sh = sheet(), it = item(sh.id)!, q = resolveItemQty(sh, it, qOf(sh, 'main'));
     if (!(q > 0)) return void toast('Pick an amount first');
-    logged('eat', [{ item_id: it.id, qty: q }], ate(it, q)); closeSheet(s);
+    const lines = [{ item_id: it.id, qty: q }];
+    if (!confirmOverdraw(st(), lines)) return;
+    logged('eat', lines, ate(it, q)); closeSheet(s);
   },
   add: () => {
     const sh = sheet(), it = item(sh.id)!, q = resolveItemQty(sh, it, qOf(sh, 'main'));
@@ -357,6 +395,7 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     const sh = sheet(), p = st().presets.find(x => x.id === sh.id)!;
     const lines = presetLines(p.lines.map(l => l.item_id), sh.q);
     if (!lines.length) return void toast('Pick an amount first');
+    if (!confirmOverdraw(st(), lines)) return;
     logged('eat', lines, `Logged ${p.name}`, { preset_id: p.id, note: p.name }); closeSheet(s);
   },
   presetAdd: el => {
@@ -420,6 +459,7 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     const ids = sh.lines ?? [];
     const auto = cookBatchMacros(st().items, ids, sh.q);
     const ingredients = ids.map(id => ({ item_id: id, qty: qOf(sh, String(id)) })).filter(l => l.qty > 0);
+    if (!confirmOverdraw(st(), ingredients)) return;
     sh.busy = true; commit();
     try {
       const next = await cookMeal({

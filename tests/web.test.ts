@@ -1,11 +1,12 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { Idiomorph } from 'idiomorph';
 import { ApiError } from '../src/web/api.ts';
 import { html, htmlToString } from '../src/web/html.ts';
 import { flush } from '../src/web/outbox.ts';
 import { applyOps } from '../src/shared/stock.ts';
 import type { BarcodeLookup, PendingOp, State } from '../src/shared/types.ts';
-import { enqueueEvent, enqueueUndo, newStore, openSheet, qOf, receive, stepQ, view } from '../src/web/store.ts';
-import { findCreatedItem, visibleLowItems } from '../src/web/ui/actions.ts';
+import { enqueueEvent, enqueueUndo, newStore, openSheet, qOf, receive, stepQ, store as singletonStore, view } from '../src/web/store.ts';
+import { actions, findCreatedItem, overdrawWarning, visibleLowItems } from '../src/web/ui/actions.ts';
 import { barcodeToFields, stopScanner } from '../src/web/ui/components/barcode.ts';
 import { cookBatchMacros } from '../src/web/ui/components/cook.ts';
 import { itemToFields, macroBasis } from '../src/web/ui/components/sheets.ts';
@@ -260,6 +261,116 @@ describe('v2 sheets and helpers', () => {
     expect(lowIds).toContain(100);
     expect(findCreatedItem(f.items, 'Eggs', 1)?.id).toBe(101);
     expect(findCreatedItem(f.items, 'Eggs', null)?.id).toBe(1);
+  });
+
+  test('overdrawWarning detects negative stock transitions and ignores >= 0 or level items', () => {
+    const f = structuredClone(fixture);
+    f.items[0]!.stock = 2; // Eggs (pc)
+    f.items[1]!.stock = -1; // Milk (l) already 1 owed
+    const levelItem = f.items.find(i => i.unit === 'level')!;
+
+    expect(overdrawWarning(f, [{ item_id: 1, qty: 2 }])).toBeNull();
+    expect(overdrawWarning(f, [{ item_id: levelItem.id, qty: 5 }])).toBeNull();
+
+    const single = overdrawWarning(f, [{ item_id: 1, qty: 3 }]);
+    expect(single).toBe('Eggs only has 2 pc left (taking 3 pc will leave 1 pc owed). Proceed anyway?');
+
+    const multi = overdrawWarning(f, [{ item_id: 1, qty: 3 }, { item_id: 2, qty: 2 }]);
+    expect(multi).toContain('This will overdraw:');
+    expect(multi).toContain('Eggs only has 2 pc left');
+    expect(multi).toContain('1 slice owed; taking 2 slice will leave 3 slice owed');
+  });
+
+  test('pantry and itemSheet render owed debt badge and inline overdraw warning', () => {
+    const s = fresh();
+    s.server!.items[0]!.stock = -3; // Eggs: 3 owed
+    s.server!.items[3]!.stock = 200; // Beef: 200g left
+    const pantryOut = appHtml(s, new Date(fixture.now));
+    expect(pantryOut).toContain('debt-badge');
+    expect(pantryOut).toContain('3 owed');
+
+    openSheet(s, { t: 'item', id: 1, q: { main: 2 } }, itemToFields(s.server!.items[0]!));
+    const itemOut = sheetHtml(s);
+    expect(itemOut).toContain('debt-badge');
+    expect(itemOut).toContain('3 owed');
+    expect(itemOut).toContain('3 pc owed from earlier eats — Set exact amount to clear');
+    expect(itemOut).toContain('overdraw-warn');
+
+    openSheet(s, { t: 'cook', q: { 4: 500 }, lines: [4] }, {
+      cookName: 'Stew', cookEmoji: '🍲', cookOwner: 'shared', cookPortions: '4', cookGrams: '1000', cookExpiry: '2026-11-19',
+    });
+    const cookOut = sheetHtml(s);
+    expect(cookOut).toContain('overdraw-warn compact');
+    expect(cookOut).toContain('Only 200 g in stock');
+  });
+
+  test('eat paths abort when confirm returns false and proceed into negative stock when true', async () => {
+    const prevServer = singletonStore.server;
+    const prevPending = singletonStore.pending;
+    const prevSheet = singletonStore.ui.sheet;
+    const prevConfirm = globalThis.confirm;
+    const prevWindow = globalThis.window;
+    const prevDoc = globalThis.document;
+    const morphSpy = vi.spyOn(Idiomorph, 'morph').mockImplementation(() => []);
+
+    try {
+      const f = structuredClone(fixture);
+      f.items[0]!.stock = 2; // Eggs
+      singletonStore.server = f;
+      singletonStore.pending = [];
+
+      const fakeEl = (dataset: Record<string, string>) => ({ dataset }) as unknown as HTMLElement;
+
+      // 1. Cancel on take, eat, logPreset, saveCook
+      globalThis.confirm = vi.fn(() => false);
+      await actions.take!(fakeEl({ id: '1' }));
+      expect(singletonStore.pending).toHaveLength(0);
+      expect(view(singletonStore)!.items[0]!.stock).toBe(2);
+
+      openSheet(singletonStore, { t: 'item', id: 1, q: { main: 5 } });
+      await actions.eat!(fakeEl({}));
+      expect(singletonStore.pending).toHaveLength(0);
+      expect(singletonStore.ui.sheet?.t).toBe('item');
+
+      openSheet(singletonStore, { t: 'preset', id: 1, q: { 1: 4 } });
+      await actions.logPreset!(fakeEl({}));
+      expect(singletonStore.pending).toHaveLength(0);
+      expect(singletonStore.ui.sheet?.t).toBe('preset');
+
+      vi.stubGlobal('navigator', { onLine: true });
+      openSheet(singletonStore, { t: 'cook', q: { 1: 4 }, lines: [1] }, {
+        cookName: 'Omelette', cookPortions: '2', cookGrams: '300', cookExpiry: '2026-11-19',
+      });
+      await actions.saveCook!(fakeEl({}));
+      expect(singletonStore.ui.sheet?.t).toBe('cook');
+      expect((globalThis.confirm as ReturnType<typeof vi.fn>).mock.calls.length).toBe(4);
+
+      // 2. Proceed on eat when confirm returns true -> creates negative stock
+      globalThis.confirm = vi.fn(() => true);
+      vi.stubGlobal('window', { setTimeout: () => 0 });
+      vi.stubGlobal('document', {
+        getElementById: () => ({ classList: { toggle() {} }, setAttribute() {}, scrollTop: 0, querySelector: () => null, focus() {} }),
+        documentElement: { classList: { toggle() {} } },
+        activeElement: null,
+        querySelector: () => null,
+        title: '',
+      });
+      openSheet(singletonStore, { t: 'item', id: 1, q: { main: 5 } });
+      await actions.eat!(fakeEl({}));
+      expect(singletonStore.pending).toHaveLength(1);
+      expect(view(singletonStore)!.items[0]!.stock).toBe(-3);
+      expect(singletonStore.ui.sheet).toBeNull();
+      await new Promise(r => setTimeout(r, 0));
+    } finally {
+      morphSpy.mockRestore();
+      vi.unstubAllGlobals();
+      globalThis.confirm = prevConfirm;
+      globalThis.window = prevWindow;
+      globalThis.document = prevDoc;
+      singletonStore.server = prevServer;
+      singletonStore.pending = prevPending;
+      singletonStore.ui.sheet = prevSheet;
+    }
   });
 });
 

@@ -54,9 +54,13 @@ export function itemSheet(v: V, sh: Sheet) {
   const it = v.st.items.find(i => i.id === sh.id);
   if (!it) return html``;
   const { st, ui } = v, off = ui.online ? '' : 'disabled', n = shown(it.stock);
+  const owed = it.unit !== 'level' && it.stock < 0 ? shown(-it.stock) : 0;
   const canPortion = !!(it.is_cooked && it.portion_g != null);
   const usePortions = !!(canPortion && sh.portionMode);
   const ports = canPortion ? portionCount(it, n) : null;
+  const rawQ = qOf(sh, 'main');
+  const eatQty = usePortions ? Math.round(rawQ * it.portion_g! * 1000) / 1000 : rawQ;
+  const overdraw = it.unit !== 'level' && eatQty > n;
   const owner = it.owner_id == null ? null : st.users.find(u => u.id === it.owner_id);
   const { mult, label } = macroBasis(it.unit);
   const metaBits: string[] = [
@@ -68,15 +72,17 @@ export function itemSheet(v: V, sh: Sheet) {
   ];
   return html`<h2 id="sheet-title">${it.emoji} ${it.name}</h2>
     <p class="stock center">${it.unit === 'level' ? html`${level(n)} ${levelName(n)}`
-      : ports != null ? `${fmtNum(ports)} port · ${fmtNum(n)} g` : `${fmtNum(n)} ${it.unit}`}</p>
+      : ports != null ? `${fmtNum(ports)} port · ${fmtNum(n)} g` : `${fmtNum(n)} ${it.unit}`}${owed > 0 ? html` <span class="debt-badge">${fmtNum(owed)} owed</span>` : ''}</p>
     <p class="small muted center" style="margin:-2px 0 10px">${metaBits.join(' · ')}</p>
+    ${owed > 0 ? html`<p class="debt-note">${fmtNum(owed)} ${it.unit} owed from earlier eats — Set exact amount to clear</p>` : ''}
     ${canPortion ? html`<div class="seg" role="group" aria-label="Unit mode" style="margin-bottom:10px">
       <button class="${usePortions ? 'on' : ''}" data-a="portionMode" data-v="1">Portions (${fmtNum(it.portion_g!)}g)</button>
       <button class="${!usePortions ? 'on' : ''}" data-a="portionMode" data-v="0">Grams</button>
     </div>` : ''}
     ${it.unit === 'level'
       ? html`<div class="row wrap">${([['Full', 1], ['Half', 0.5], ['Low', 0.25], ['Out', 0]] as const).map(([l, x]) => html`<button class="btn alt grow" data-a="level" data-v="${x}">${l}</button>`)}</div>`
-      : html`${stepper(ui, 'main', qOf(sh, 'main'), usePortions ? 0.5 : it.step, usePortions ? 'portion' : it.unit)}
+      : html`${stepper(ui, 'main', rawQ, usePortions ? 0.5 : it.step, usePortions ? 'portion' : it.unit)}
+        ${overdraw ? html`<p class="overdraw-warn">⚠️ Only ${fmtNum(n)} ${it.unit} in stock — eating ${fmtNum(eatQty)} ${it.unit} will leave ${fmtNum(shown(eatQty - it.stock))} ${it.unit} owed</p>` : ''}
         <div class="row"><button class="btn grow" data-a="eat">Eat</button><button class="btn alt grow" data-a="add">Add</button></div>
         <div class="row wrap" style="margin-top:12px"><button class="btn alt grow" data-a="pack">Add a pack (+${fmtNum(it.pack_size)})</button>
           <button class="linkbtn grow" data-a="setExact">Set exact amount</button></div>

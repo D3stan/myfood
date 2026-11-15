@@ -48,6 +48,7 @@ function macroSub(it: Item): string | null {
 
 function itemCard(v: V, it: Item, nowMs: number) {
   const n = shown(it.stock), out = n === 0, usual = v.st.usual[it.id] ?? it.step;
+  const owed = it.unit !== 'level' && it.stock < 0 ? shown(-it.stock) : 0;
   const owner = ownerOf(v.st, it.owner_id);
   const exp = n > 0 ? expiryLabel(it.expires_at, nowMs) : null;
   const expSoon = exp != null && it.expires_at != null && daysUntil(it.expires_at, nowMs) <= 3;
@@ -58,7 +59,7 @@ function itemCard(v: V, it: Item, nowMs: number) {
     <span class="name">${it.name}</span>
     <div class="qty">${it.unit === 'level' ? level(n)
       : ports != null ? html`${fmtNum(ports)} <small>port · ${fmtNum(n)} g</small>`
-      : html`${fmtNum(n)} <small>${it.unit}</small>`}</div>
+      : html`${fmtNum(n)} <small>${it.unit}</small>`}${owed > 0 ? html` <span class="debt-badge">${fmtNum(owed)} owed</span>` : ''}</div>
     ${exp ? html`<div class="small ${expSoon ? 'exp-soon' : 'muted'}">⏰ ${exp}</div>` : ''}
     ${macros ? html`<div class="small muted clip">${macros}</div>` : ''}
     ${it.unit === 'level' ? '' : html`<button class="take" data-a="take" data-id="${it.id}" aria-label="Eat ${fmtNum(usual)} ${it.unit} of ${it.name}">${fmtNum(usual)}</button>`}

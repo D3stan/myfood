@@ -1,5 +1,6 @@
 import { html } from '../../html.ts';
 import { addDays, isoDate } from '../../../shared/dates.ts';
+import { shown } from '../../../shared/stock.ts';
 import { fmtNum, parseNum } from '../../../shared/text.ts';
 import type { Item } from '../../../shared/types.ts';
 import { qOf } from '../../store.ts';
@@ -76,12 +77,16 @@ export function cookSheet(v: V, sh: Sheet) {
     <label class="field">Ingredients used (deducted from pantry)</label>
     ${ids.length ? ids.map(id => {
       const it = st.items.find(i => i.id === id);
+      const qty = qOf(sh, String(id));
+      const avail = it ? shown(it.stock) : 0;
+      const over = !!(it && it.unit !== 'level' && qty > avail);
       return html`<div class="line" id="ck-${id}">
         <span class="emoji">${it?.emoji ?? '❔'}</span>
         <span class="n">${it?.name ?? 'Unknown'} <span class="muted small">${it ? unitOf(it) : ''}</span></span>
-        ${it ? stepper(ui, String(id), qOf(sh, String(id)), stepOf(it), '', true) : ''}
+        ${it ? stepper(ui, String(id), qty, stepOf(it), '', true) : ''}
         <button class="btn alt icon" data-a="rmLine" data-k="${id}" aria-label="Remove ${it?.name ?? 'ingredient'}">×</button>
-      </div>`;
+      </div>
+      ${over ? html`<div class="overdraw-warn compact">⚠️ Only ${fmtNum(avail)} ${it.unit} in stock (will leave ${fmtNum(shown(qty - it.stock))} ${it.unit} owed)</div>` : ''}`;
     }) : html`<p class="small muted" style="margin:4px 0">No ingredients picked (optional — you can still log a cooked batch directly).</p>`}
     ${free.length ? html`<select id="cook-add-ing" data-c="cookAddIng" aria-label="Add ingredient" style="margin-top:8px">
       <option value="">+ Add an ingredient…</option>
