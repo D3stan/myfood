@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
 import { Hono } from 'hono';
@@ -7,13 +8,38 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import type { ZodType } from 'zod';
-import { ApplyBody, EventBody, EventPatch, ItemBody, ItemPatch, LoginBody, MeBody, PresetBody } from '../shared/types.ts';
+import { nameKey } from '../shared/text.ts';
+import {
+  ApplyBody,
+  BarcodeLinkBody,
+  CookBody,
+  EventBody,
+  EventPatch,
+  ExpenseBody,
+  ItemBody,
+  ItemPatch,
+  JobMode,
+  LockPeriodBody,
+  LoginBody,
+  MeBody,
+  PresetBody,
+  PushSubscribeBody,
+  PushUnsubscribeBody,
+  SettingsBody,
+  ShortcutBody,
+  TokenBody,
+} from '../shared/types.ts';
 import type { Health } from '../shared/types.ts';
-import { createSession, createThrottle, deleteSession, findSession } from './auth.ts';
+import { createApiToken, createSession, createThrottle, deleteSession, findApiToken, findSession, revokeApiToken } from './auth.ts';
+import { linkBarcode, resolveBarcode } from './barcodes.ts';
+import type { BarcodeLookupFn } from './barcodes.ts';
+import { bumpRev } from './db.ts';
 import type { Db } from './db.ts';
 import * as d from './domain.ts';
-import { createJobs } from './jobs.ts';
+import { createJobs, runShortcutAi } from './jobs.ts';
 import type { JobFile, RunAi } from './jobs.ts';
+import { ensureVapidKeys, notifyLowCrossings, sendTestPush, subscribePush, unsubscribePush } from './push.ts';
+import type { PushSender } from './push.ts';
 
 export interface Deps {
   db: Db;
@@ -26,7 +52,10 @@ export interface Deps {
   now?: () => number;
   /** Drops the cookie's Secure flag, for http on localhost. */
   insecureCookies?: boolean;
+  sendPush?: PushSender;
+  lookupBarcode?: BarcodeLookupFn;
 }
+export type AppOpts = Deps;
 
 type Env = { Variables: { uid: number } };
 
@@ -56,7 +85,9 @@ function parse<T>(schema: ZodType<T>, data: unknown): T {
 export function createApp(deps: Deps): Hono<Env> {
   const { db, build, dataDir } = deps;
   const now = deps.now ?? Date.now;
-  const jobs = createJobs({ db, runAi: deps.runAi, jobsDir: deps.jobsDir ?? join(dataDir, 'jobs'), now });
+  const jobsDir = deps.jobsDir ?? join(dataDir, 'jobs');
+  ensureVapidKeys(db);
+  const jobs = createJobs({ db, runAi: deps.runAi, jobsDir, now, sendPush: deps.sendPush });
   const throttle = createThrottle();
   const webDir = resolve(deps.webDir);
   const app = new Hono<Env>();
@@ -76,6 +107,13 @@ export function createApp(deps: Deps): Hono<Env> {
     if (cf) return cf;
     try { return getConnInfo(c).remote.address ?? 'unknown'; } catch { return 'unknown'; }
   };
+  const pushLow = async (prevStocks: Map<number, number>) => {
+    try {
+      await notifyLowCrossings(db, prevStocks, deps.sendPush, now());
+    } catch (e) {
+      console.warn('[push] low check failed', e);
+    }
+  };
 
   app.use('*', async (c, next) => {
     await next();
@@ -86,16 +124,29 @@ export function createApp(deps: Deps): Hono<Env> {
 
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.req.header('X-MyFood') !== '1') d.fail(400, 'Missing X-MyFood header');
-    await next();
-  });
+    const authHdr = c.req.header('authorization');
+    const bearer = authHdr ? /^Bearer\s+(\S+)$/i.exec(authHdr.trim()) : null;
+    if (bearer) {
+      const tok = findApiToken(db, bearer[1], now());
+      if (!tok) d.fail(401, 'Invalid or revoked token');
+      const scopes = tok.scopes.split(',').map(s => s.trim());
+      const isHealth = c.req.method === 'GET' && c.req.path === '/api/health';
+      const isShortcut = c.req.method === 'POST' && c.req.path === '/api/shortcut';
+      if (!isHealth && !(isShortcut && scopes.includes('shortcut'))) {
+        d.fail(403, 'Token scope does not allow this route');
+      }
+      c.set('uid', tok.userId);
+      return next();
+    }
 
-  app.use('/api/*', async (c, next) => {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.req.header('X-MyFood') !== '1') {
+      d.fail(400, 'Missing X-MyFood header');
+    }
     if (c.req.path === '/api/login' || c.req.path === '/api/health') return next();
     const s = findSession(db, getCookie(c, 'sid'), now());
     if (!s) d.fail(401, 'Please sign in');
-    if (s!.renew) sendCookie(c, getCookie(c, 'sid')!);
-    c.set('uid', s!.userId);
+    if (s.renew) sendCookie(c, getCookie(c, 'sid')!);
+    c.set('uid', s.userId);
     await next();
   });
 
@@ -128,13 +179,20 @@ export function createApp(deps: Deps): Hono<Env> {
     return c.json(state(c.get('uid')));
   });
 
+  app.patch('/api/settings', async c => {
+    d.patchSettings(db, parse(SettingsBody, await json(c)));
+    return c.json(state(c.get('uid')));
+  });
+
   // ---- events ----
   app.post('/api/events', async c => {
-    d.createEvent(db, c.get('uid'), parse(EventBody, await json(c)), now());
+    const { prevStocks } = d.createEvent(db, c.get('uid'), parse(EventBody, await json(c)), now());
+    await pushLow(prevStocks);
     return c.json(state(c.get('uid')));
   });
   app.patch('/api/events/:cid', async c => {
-    d.editEvent(db, c.req.param('cid'), parse(EventPatch, await json(c)));
+    const prevStocks = d.editEvent(db, c.req.param('cid'), parse(EventPatch, await json(c)));
+    await pushLow(prevStocks);
     return c.json(state(c.get('uid')));
   });
   app.delete('/api/events/:cid', c => {
@@ -156,6 +214,33 @@ export function createApp(deps: Deps): Hono<Env> {
     return c.json(state(c.get('uid')));
   });
 
+  // ---- cooked meals ----
+  app.post('/api/meals/cook', async c => {
+    const { prevStocks } = d.applyCookBatch(db, c.get('uid'), parse(CookBody, await json(c)), { now: now() });
+    await pushLow(prevStocks);
+    return c.json(state(c.get('uid')));
+  });
+
+  // ---- expenses ----
+  app.post('/api/expenses', async c => {
+    d.addExpense(db, c.get('uid'), parse(ExpenseBody, await json(c)), now());
+    return c.json(state(c.get('uid')));
+  });
+  app.post('/api/expenses/lock', async c => {
+    d.lockExpensePeriod(db, c.get('uid'), parse(LockPeriodBody, await json(c)), now());
+    return c.json(state(c.get('uid')));
+  });
+  app.get('/api/expenses/export', c => {
+    const period = c.req.query('period') || undefined;
+    const formatRaw = (c.req.query('format') || 'csv').toLowerCase();
+    if (formatRaw !== 'csv' && formatRaw !== 'json') d.fail(400, 'Format must be csv or json');
+    const out = d.exportExpenses(db, { period, format: formatRaw });
+    return c.body(out.body, 200, {
+      'Content-Type': out.contentType,
+      'Content-Disposition': `attachment; filename="${out.filename}"`,
+    });
+  });
+
   // ---- presets ----
   app.post('/api/presets', async c => {
     d.createPreset(db, c.get('uid'), parse(PresetBody, await json(c)));
@@ -170,6 +255,86 @@ export function createApp(deps: Deps): Hono<Env> {
     return c.json(state(c.get('uid')));
   });
 
+  // ---- api tokens & shortcut ----
+  app.post('/api/tokens', async c => {
+    const body = parse(TokenBody, await json(c));
+    const { token, info } = createApiToken(db, c.get('uid'), body.name, now());
+    bumpRev(db);
+    return c.json({ token, info, state: state(c.get('uid')) });
+  });
+  app.delete('/api/tokens/:id', c => {
+    const res = revokeApiToken(db, c.get('uid'), id(c), now());
+    if (res === 'missing') d.fail(404, 'No such token');
+    if (res === 'revoked') bumpRev(db);
+    return c.json(state(c.get('uid')));
+  });
+  app.post('/api/shortcut', async c => {
+    const uid = c.get('uid');
+    const body = parse(ShortcutBody, await json(c));
+    if (body.preset_id == null && !body.preset && !body.text) {
+      d.fail(400, 'Provide text, preset, or preset_id');
+    }
+    const presets = d.listPresets(db, uid);
+    const matched = body.preset_id != null
+      ? presets.find(p => p.id === body.preset_id)
+      : body.preset != null
+        ? presets.find(p => nameKey(p.name) === nameKey(body.preset!))
+        : presets.find(p => nameKey(p.name) === nameKey(body.text!));
+
+    if ((body.preset_id != null || (body.preset != null && !body.text)) && !matched) {
+      d.fail(404, 'No such preset');
+    }
+
+    if (matched) {
+      if (!matched.lines.length) d.fail(400, 'Preset has no items');
+      const { prevStocks, seq } = d.createEvent(
+        db,
+        uid,
+        {
+          cid: `sc-${randomUUID()}`,
+          at: now(),
+          kind: 'eat',
+          preset_id: matched.id,
+          note: matched.name,
+          lines: matched.lines,
+        },
+        now(),
+        { source: 'shortcut' },
+      );
+      await pushLow(prevStocks);
+      return c.json({ ok: true, reply: `Logged ${matched.name}`, event_ids: seq != null ? [seq] : [] });
+    }
+
+    const res = await runShortcutAi(db, { runAi: deps.runAi, jobsDir, now, sendPush: deps.sendPush }, uid, body.text!);
+    return c.json({ ok: true, ...res });
+  });
+
+  // ---- barcodes ----
+  app.get('/api/barcodes/:code', async c => {
+    const lookup = await resolveBarcode(db, c.req.param('code'), deps.lookupBarcode, now());
+    return c.json(lookup);
+  });
+  app.post('/api/barcodes/link', async c => {
+    const body = parse(BarcodeLinkBody, await json(c));
+    linkBarcode(db, body.code, body.item_id, now());
+    return c.json(state(c.get('uid')));
+  });
+
+  // ---- push ----
+  app.post('/api/push/subscribe', async c => {
+    subscribePush(db, c.get('uid'), parse(PushSubscribeBody, await json(c)), c.req.header('user-agent') ?? null, now());
+    return c.json(state(c.get('uid')));
+  });
+  app.delete('/api/push/subscribe', async c => {
+    const body = parse(PushUnsubscribeBody, await json(c));
+    unsubscribePush(db, c.get('uid'), body.endpoint);
+    return c.json(state(c.get('uid')));
+  });
+  app.post('/api/push/test', async c => {
+    const res = await sendTestPush(db, c.get('uid'), deps.sendPush, now());
+    return c.json({ ok: true, ...res });
+  });
+
   // ---- jobs ----
   app.post('/api/jobs', bodyLimit({
     maxSize: MAX_IMAGES * MAX_IMAGE + 100_000,
@@ -180,6 +345,9 @@ export function createApp(deps: Deps): Hono<Env> {
     try { form = await c.req.parseBody({ all: true }); } catch { return d.fail(400, 'The form could not be read'); }
     const text = form.text ?? '';
     if (typeof text !== 'string') d.fail(400, 'text must be text');
+    const rawMode = form.mode ?? 'auto';
+    if (typeof rawMode !== 'string') d.fail(400, 'mode must be text');
+    const mode = parse(JobMode, rawMode);
     const raw = [form.images].flat().filter(v => v !== undefined && v !== '');
     if (raw.length > MAX_IMAGES) d.fail(400, `At most ${MAX_IMAGES} photos`);
     const files: JobFile[] = [];
@@ -193,11 +361,12 @@ export function createApp(deps: Deps): Hono<Env> {
       if (!ext) d.fail(400, 'Only JPEG, PNG and WebP photos are accepted');
       files.push({ bytes, ext: ext! });
     }
-    jobs.submit(c.get('uid'), (text as string).trim(), files);
+    jobs.submit(c.get('uid'), (text as string).trim(), files, mode);
     return c.json(state(c.get('uid')));
   });
   app.post('/api/jobs/:id/apply', async c => {
-    jobs.apply(c.get('uid'), id(c), parse(ApplyBody, await json(c)).events);
+    const body = parse(ApplyBody, await json(c));
+    jobs.apply(c.get('uid'), id(c), body.events, body.cook);
     return c.json(state(c.get('uid')));
   });
   app.delete('/api/jobs/:id', c => {

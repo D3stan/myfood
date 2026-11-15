@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { serve } from '@hono/node-server';
 import { runAi } from './ai/agy.ts';
 import { openDb } from './db.ts';
+import { checkExpiryPushes, ensureVapidKeys } from './push.ts';
 import { createApp } from './routes.ts';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -17,9 +18,18 @@ mkdirSync(jobsDir, { recursive: true, mode: 0o750 });
 const dbFile = join(dataDir, 'myfood.db');
 const db = openDb(dbFile);
 chmodSync(dbFile, 0o600);
+ensureVapidKeys(db);
 
 const buildFile = join(webDir, 'build.txt');
 const build = existsSync(buildFile) ? readFileSync(buildFile, 'utf8').trim() : 'dev';
 
 const app = createApp({ db, runAi, dataDir, jobsDir, build, webDir, insecureCookies: process.env.INSECURE_COOKIES === '1' });
 serve({ fetch: app.fetch, port, hostname: host }, i => console.log(`MyFood ${build} on http://${host}:${i.port}`));
+
+// Check expiry notifications every 15 minutes during the morning window (08:00-09:59 local time).
+setInterval(() => {
+  const hour = new Date().getHours();
+  if (hour >= 8 && hour < 10) {
+    void checkExpiryPushes(db).catch(err => console.error('[push] expiry check failed', err));
+  }
+}, 15 * 60_000).unref();

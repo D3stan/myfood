@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import type { ApiTokenInfo } from '../shared/types.ts';
 import type { Db } from './db.ts';
-import { get, run } from './db.ts';
+import { all, get, run } from './db.ts';
 
 export const DAY = 86_400_000;
 const YEAR = 365 * DAY;
@@ -54,6 +55,70 @@ export function findSession(db: Db, token: string | undefined, now: number): { u
 
 export const deleteSession = (db: Db, token: string): void => void run(db, 'DELETE FROM sessions WHERE token_hash = ?', sha256(token));
 export const deleteUserSessions = (db: Db, userId: number): void => void run(db, 'DELETE FROM sessions WHERE user_id = ?', userId);
+
+export interface ApiTokenAuth {
+  tokenId: number;
+  userId: number;
+  scopes: string;
+}
+
+/** Creates a bearer API token, returning the plaintext secret once alongside metadata. */
+export function createApiToken(
+  db: Db,
+  userId: number,
+  name: string,
+  now: number,
+  scopes = 'shortcut',
+): { token: string; info: ApiTokenInfo } {
+  const token = `mf_${randomBytes(24).toString('base64url')}`;
+  const prefix = token.slice(0, 10);
+  const id = Number(
+    run(
+      db,
+      'INSERT INTO api_tokens(user_id, name, token_hash, prefix, scopes, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      userId,
+      name,
+      sha256(token),
+      prefix,
+      scopes,
+      now,
+    ).lastInsertRowid,
+  );
+  return {
+    token,
+    info: { id, name, prefix, scopes, created_at: now, last_used_at: null },
+  };
+}
+
+/** Authenticates a Bearer token against active (non-revoked) api_tokens and updates last_used_at. */
+export function findApiToken(db: Db, token: string | undefined, now: number): ApiTokenAuth | null {
+  if (!token || token.length > 200) return null;
+  const hash = sha256(token);
+  const row = get<{ id: number; user_id: number; token_hash: string; scopes: string }>(
+    db,
+    'SELECT id, user_id, token_hash, scopes FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL',
+    hash,
+  );
+  if (!row || !same(row.token_hash, hash)) return null;
+  run(db, 'UPDATE api_tokens SET last_used_at = ? WHERE id = ?', now, row.id);
+  return { tokenId: row.id, userId: row.user_id, scopes: row.scopes };
+}
+
+export function listApiTokens(db: Db, userId: number): ApiTokenInfo[] {
+  return all<ApiTokenInfo>(
+    db,
+    'SELECT id, name, prefix, scopes, created_at, last_used_at FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL ORDER BY id DESC',
+    userId,
+  );
+}
+
+export function revokeApiToken(db: Db, userId: number, tokenId: number, now: number): 'revoked' | 'already' | 'missing' {
+  const row = get<{ revoked_at: number | null }>(db, 'SELECT revoked_at FROM api_tokens WHERE id = ? AND user_id = ?', tokenId, userId);
+  if (!row) return 'missing';
+  if (row.revoked_at !== null) return 'already';
+  run(db, 'UPDATE api_tokens SET revoked_at = ? WHERE id = ?', now, tokenId);
+  return 'revoked';
+}
 
 /** xxxx-xxxx-xxxx, about 60 bits. Used by the seed script. */
 export function newCode(): string {

@@ -7,6 +7,7 @@ export type Db = DatabaseSync;
 export function openDb(path: string): Db {
   const db = new DatabaseSync(path);
   db.exec(readFileSync(new URL('./schema.sql', import.meta.url), 'utf8'));
+  migrate(db);
   return db;
 }
 
@@ -29,3 +30,108 @@ export function transaction<T>(db: Db, fn: () => T): T {
 
 export const bumpRev = (db: Db): void => void run(db, "UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'rev'");
 export const getRev = (db: Db): number => Number(get<{ value: string }>(db, "SELECT value FROM meta WHERE key = 'rev'")!.value);
+
+export const getMeta = (db: Db, key: string): string | null =>
+  get<{ value: string }>(db, 'SELECT value FROM meta WHERE key = ?', key)?.value ?? null;
+
+export const setMeta = (db: Db, key: string, value: string): void =>
+  void run(db, 'INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
+
+const colsOf = (db: Db, table: string): Set<string> =>
+  new Set(all<{ name: string }>(db, `PRAGMA table_info(${table})`).map(c => c.name));
+
+function addCol(db: Db, table: string, col: string, ddl: string): void {
+  if (!colsOf(db, table).has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
+}
+
+function hasLegacyItemsUnique(db: Db): boolean {
+  const idxs = all<{ name: string; origin: string; unique: number }>(db, "PRAGMA index_list('items')");
+  return idxs.some((idx) => {
+    if (idx.origin !== 'u' && idx.unique !== 1) return false;
+    const cols = all<{ name: string }>(db, `PRAGMA index_info('${idx.name.replace(/'/g, "''")}')`).map(c => c.name);
+    return cols.length === 1 && cols[0] === 'name_key';
+  });
+}
+
+function rebuildItemsTable(db: Db): void {
+  const c = colsOf(db, 'items');
+  const sel = (name: string, fallback: string) => (c.has(name) ? name : `${fallback} AS ${name}`);
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    transaction(db, () => {
+      db.exec(`
+        CREATE TABLE items_v2 (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          name_key TEXT NOT NULL,
+          emoji TEXT NOT NULL,
+          category TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          step REAL NOT NULL,
+          pack_size REAL NOT NULL,
+          low_at REAL,
+          owner_id INTEGER REFERENCES users(id),
+          is_cooked INTEGER NOT NULL DEFAULT 0,
+          portion_g REAL,
+          expires_at TEXT,
+          shelf_life_days INTEGER,
+          kcal_per_unit REAL,
+          protein_per_unit REAL,
+          archived_at INTEGER,
+          created_at INTEGER NOT NULL
+        );
+        INSERT INTO items_v2(
+          id, name, name_key, emoji, category, unit, step, pack_size, low_at,
+          owner_id, is_cooked, portion_g, expires_at, shelf_life_days, kcal_per_unit, protein_per_unit,
+          archived_at, created_at
+        )
+        SELECT
+          id, name, name_key, emoji, category, unit, step, pack_size, low_at,
+          ${sel('owner_id', 'NULL')},
+          ${sel('is_cooked', '0')},
+          ${sel('portion_g', 'NULL')},
+          ${sel('expires_at', 'NULL')},
+          ${sel('shelf_life_days', 'NULL')},
+          ${sel('kcal_per_unit', 'NULL')},
+          ${sel('protein_per_unit', 'NULL')},
+          archived_at, created_at
+        FROM items;
+        DROP TABLE items;
+        ALTER TABLE items_v2 RENAME TO items;
+      `);
+    });
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
+/** Idempotently upgrades v1 databases (and ensures v2 indexes on fresh ones). */
+export function migrate(db: Db): void {
+  const version = get<{ user_version: number }>(db, 'PRAGMA user_version')?.user_version ?? 0;
+
+  if (version < 1) {
+    if (!colsOf(db, 'items').has('owner_id') || hasLegacyItemsUnique(db)) {
+      rebuildItemsTable(db);
+    }
+    transaction(db, () => {
+      addCol(db, 'users', 'notify_low', 'INTEGER NOT NULL DEFAULT 1');
+      addCol(db, 'users', 'notify_expiry', 'INTEGER NOT NULL DEFAULT 1');
+
+      addCol(db, 'events', 'cost_cents', 'INTEGER');
+      addCol(db, 'events', 'counts_nutrition', 'INTEGER NOT NULL DEFAULT 1');
+
+      addCol(db, 'event_lines', 'cost_cents', 'INTEGER');
+      addCol(db, 'event_lines', 'expires_at', 'TEXT');
+      addCol(db, 'event_lines', 'kcal', 'REAL');
+      addCol(db, 'event_lines', 'protein_g', 'REAL');
+
+      addCol(db, 'jobs', 'mode', "TEXT NOT NULL DEFAULT 'auto'");
+
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS items_name_owner ON items(name_key, COALESCE(owner_id, 0));
+        CREATE INDEX IF NOT EXISTS items_expires ON items(expires_at);
+        PRAGMA user_version = 1;
+      `);
+    });
+  }
+}

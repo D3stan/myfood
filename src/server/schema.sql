@@ -1,4 +1,5 @@
 -- Applied at start-up; every statement is idempotent.
+-- Note: column additions & index migrations on pre-existing v1 tables run in db.ts:migrate().
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -7,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL UNIQUE,
   emoji TEXT NOT NULL,
   code_hash TEXT NOT NULL UNIQUE,   -- sha256 hex of the access code
+  notify_low INTEGER NOT NULL DEFAULT 1,
+  notify_expiry INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
 
@@ -20,13 +23,20 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS items (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
-  name_key TEXT NOT NULL UNIQUE,    -- nameKey(name) from src/shared/text.ts
+  name_key TEXT NOT NULL,           -- uniqueness enforced by items_name_owner index in db.ts
   emoji TEXT NOT NULL,
   category TEXT NOT NULL,
   unit TEXT NOT NULL,
   step REAL NOT NULL,
   pack_size REAL NOT NULL,
   low_at REAL,
+  owner_id INTEGER REFERENCES users(id),
+  is_cooked INTEGER NOT NULL DEFAULT 0,
+  portion_g REAL,
+  expires_at TEXT,                  -- YYYY-MM-DD
+  shelf_life_days INTEGER,
+  kcal_per_unit REAL,
+  protein_per_unit REAL,
   archived_at INTEGER,
   created_at INTEGER NOT NULL
 );
@@ -43,10 +53,12 @@ CREATE TABLE IF NOT EXISTS events (
   user_id INTEGER NOT NULL REFERENCES users(id),
   at INTEGER NOT NULL,              -- unix ms
   kind TEXT NOT NULL,               -- buy | eat | adjust
-  source TEXT NOT NULL,             -- manual | preset | ai | receipt
+  source TEXT NOT NULL,             -- manual | preset | ai | receipt | audit | cook | barcode | shortcut | expense
   note TEXT,
   preset_id INTEGER,
   job_id INTEGER,
+  cost_cents INTEGER,
+  counts_nutrition INTEGER NOT NULL DEFAULT 1,
   undone_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS events_at ON events(at, seq);
@@ -56,7 +68,11 @@ CREATE TABLE IF NOT EXISTS event_lines (
   event_cid TEXT NOT NULL REFERENCES events(cid) ON DELETE CASCADE,
   item_id INTEGER NOT NULL REFERENCES items(id),
   qty REAL NOT NULL,                -- signed delta, or the absolute amount when is_set = 1
-  is_set INTEGER NOT NULL DEFAULT 0
+  is_set INTEGER NOT NULL DEFAULT 0,
+  cost_cents INTEGER,
+  expires_at TEXT,
+  kcal REAL,
+  protein_g REAL
 );
 CREATE INDEX IF NOT EXISTS event_lines_event ON event_lines(event_cid);
 
@@ -78,6 +94,7 @@ CREATE TABLE IF NOT EXISTS preset_lines (
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id),
+  mode TEXT NOT NULL DEFAULT 'auto',     -- auto | receipt | audit
   text TEXT NOT NULL,
   images TEXT NOT NULL DEFAULT '[]',     -- JSON array of file names inside the job folder
   status TEXT NOT NULL,                  -- queued | running | review | done | failed
@@ -89,5 +106,67 @@ CREATE TABLE IF NOT EXISTS jobs (
   dismissed_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  prefix TEXT NOT NULL,
+  scopes TEXT NOT NULL DEFAULT 'shortcut',
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER,
+  revoked_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS api_tokens_user ON api_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
+
+CREATE TABLE IF NOT EXISTS push_log (
+  dedupe_key TEXT PRIMARY KEY,
+  sent_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS expense_locks (
+  period TEXT PRIMARY KEY,               -- ISO week YYYY-Www
+  locked_by INTEGER NOT NULL REFERENCES users(id),
+  locked_at INTEGER NOT NULL,
+  total_cents INTEGER NOT NULL,
+  event_count INTEGER NOT NULL,
+  note TEXT
+);
+
+CREATE TABLE IF NOT EXISTS barcodes (
+  code TEXT PRIMARY KEY,
+  item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+  product_name TEXT,
+  brand TEXT,
+  unit TEXT,
+  pack_size REAL,
+  kcal_per_unit REAL,
+  protein_per_unit REAL,
+  source TEXT NOT NULL,
+  raw_json TEXT,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS barcodes_item ON barcodes(item_id);
+
+CREATE TABLE IF NOT EXISTS meal_recipes (
+  meal_item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  ingredient_item_id INTEGER NOT NULL REFERENCES items(id),
+  qty REAL NOT NULL,
+  PRIMARY KEY (meal_item_id, ingredient_item_id)
+);
+
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT OR IGNORE INTO meta(key, value) VALUES ('rev', '0');
+INSERT OR IGNORE INTO meta(key, value) VALUES ('currency', 'kr');
