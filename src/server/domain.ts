@@ -1,5 +1,5 @@
 import { addDays, isoDate, isoWeek, weekRange } from '../shared/dates.ts';
-import { computeStock, eventLineNutrition, shown, toLines } from '../shared/stock.ts';
+import { computeStock, eventLineNutrition, levelParts, nextStock, shown, toLines } from '../shared/stock.ts';
 import { nameKey } from '../shared/text.ts';
 import { CATEGORIES } from '../shared/types.ts';
 import type {
@@ -49,11 +49,11 @@ export function fail(status: 400 | 401 | 403 | 404 | 409 | 429, message: string)
 /** Stock of every item over all events that are not undone, oldest first. Not floored. */
 export function allStock(db: Db): Map<number, number> {
   return computeStock(
-    all<{ item_id: number; qty: number; is_set: number }>(
+    all<{ item_id: number; qty: number; is_set: number; kind: EventBody['kind'] }>(
       db,
-      `SELECT l.item_id, l.qty, l.is_set FROM event_lines l JOIN events e ON e.cid = l.event_cid
+      `SELECT l.item_id, l.qty, l.is_set, e.kind FROM event_lines l JOIN events e ON e.cid = l.event_cid
        WHERE e.undone_at IS NULL ORDER BY e.at, e.seq, l.rowid`,
-    ).map(l => ({ item_id: l.item_id, qty: l.qty, is_set: !!l.is_set })),
+    ).map(l => ({ item_id: l.item_id, qty: l.qty, is_set: !!l.is_set, kind: l.kind })),
   );
 }
 
@@ -138,6 +138,29 @@ const mapEvents = (db: Db, rows: EventRow[]): FoodEvent[] =>
     lines: eventLines(db, e.cid),
   }));
 
+/** Historical sealed counts for level readings, replayed from the complete active ledger. */
+function annotateLevelReadings(db: Db, events: FoodEvent[]): void {
+  const units = new Map(all<{ id: number; unit: Unit }>(db, 'SELECT id, unit FROM items').map(i => [i.id, i.unit]));
+  const selected = new Map(events.map(e => [e.cid, e]));
+  const stocks = new Map<number, number>();
+  const lineIndices = new Map<string, number>();
+  for (const row of all<{ cid: string; item_id: number; qty: number; is_set: number; kind: FoodEvent['kind'] }>(
+    db,
+    `SELECT e.cid, l.item_id, l.qty, l.is_set, e.kind FROM event_lines l JOIN events e ON e.cid = l.event_cid
+     WHERE e.undone_at IS NULL ORDER BY e.at, e.seq, l.rowid`,
+  )) {
+    const line: EventLine = { item_id: row.item_id, qty: row.qty, is_set: !!row.is_set };
+    const lineIndex = lineIndices.get(row.cid) ?? 0;
+    lineIndices.set(row.cid, lineIndex + 1);
+    if (units.get(row.item_id) === 'level' && row.kind === 'eat' && line.is_set && selected.has(row.cid)) {
+      const event = selected.get(row.cid);
+      const eventLine = event?.lines[lineIndex];
+      if (eventLine) eventLine.level_sealed_before = levelParts(stocks.get(row.item_id) ?? 0).sealed;
+    }
+    stocks.set(row.item_id, nextStock(stocks.get(row.item_id) ?? 0, line, row.kind));
+  }
+}
+
 export function buildState(db: Db, userId: number, env: StateEnv): State {
   const stock = allStock(db);
   const recipes = new Map<number, { item_id: number; qty: number }[]>();
@@ -201,6 +224,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
        FROM events WHERE undone_at IS NULL ORDER BY at DESC, seq DESC LIMIT 100`,
     ),
   );
+  annotateLevelReadings(db, events);
 
   const expenses = mapEvents(
     db,
@@ -508,7 +532,13 @@ export function editEvent(db: Db, cid: string, body: EventPatch): Map<number, nu
       cid,
     );
     if (!ev) fail(404, 'No such event');
+    const previousLines = all<{ item_id: number; is_set: number }>(db, 'SELECT item_id, is_set FROM event_lines WHERE event_cid = ?', cid);
+    const previousByItem = new Map(previousLines.map(l => [l.item_id, !!l.is_set]));
     const lines = toLines({ kind: ev.kind, lines: body.lines }, id => unitOf(db, id));
+    // Older level purchases were stored as absolute set lines. Preserve that meaning if edited.
+    if (ev.kind === 'buy') for (const line of lines) {
+      if (unitOf(db, line.item_id) === 'level' && previousByItem.get(line.item_id)) line.is_set = true;
+    }
     if (!lines.length) noLines();
 
     const lineCost = sumLineCosts(lines);
@@ -593,12 +623,13 @@ export function applyCookBatch(
     let hasProtein = false;
     const ingList: { item_id: number; qty: number }[] = [];
     for (const [itemId, qty] of agg) {
-      const item = get<{ id: number; kcal_per_unit: number | null; protein_per_unit: number | null }>(
+      const item = get<{ id: number; unit: Unit; kcal_per_unit: number | null; protein_per_unit: number | null }>(
         db,
-        'SELECT id, kcal_per_unit, protein_per_unit FROM items WHERE id = ? AND archived_at IS NULL',
+        'SELECT id, unit, kcal_per_unit, protein_per_unit FROM items WHERE id = ? AND archived_at IS NULL',
         itemId,
       );
       if (!item) fail(400, `Ingredient item ${itemId} does not exist`);
+      if (item.unit === 'level') continue;
       ingList.push({ item_id: itemId, qty });
       if (item.kcal_per_unit != null) {
         hasKcal = true;

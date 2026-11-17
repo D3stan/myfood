@@ -369,6 +369,17 @@ test('receipt buy converts price, total_cost, expires_in_days, and new_item owne
   expect(s.events[0]!.lines[1]).toMatchObject({ cost_cents: 3150, expires_at: addDays(today, 30) });
 });
 
+test('receipt purchase adds one level container to the existing total', async () => {
+  await api('POST', '/api/items', { name: 'Salt', emoji: '🧂', category: 'spices', unit: 'level', step: 0.25, pack_size: 4, low_at: null });
+  const salt = (await state()).items.find(i => i.name === 'Salt')!.id;
+  await api('POST', '/api/events', { cid: 'salt-seed-001', at: 1, kind: 'adjust', lines: [{ item_id: salt, qty: 0.25 }] });
+  answer = reply([eventOf('buy', [line(salt, 1, { raw: 'salt' })])]);
+  await submit('REMA', 1, 'receipt');
+  const job = (await settle()).jobs[0]!;
+  const applied = await (await api('POST', `/api/jobs/${job.id}/apply`, { events: job.result!.events })).json() as State;
+  expect(applied.items.find(i => i.id === salt)!.stock).toBe(1.25);
+});
+
 test('cook batch auto-applies on text job and applies on reviewed image job', async () => {
   await api('POST', '/api/items', { name: 'Beef', emoji: '🥩', category: 'meat', unit: 'g', step: 50, pack_size: 500, low_at: null, kcal_per_unit: 2, protein_per_unit: 0.2 });
   let s = await state();

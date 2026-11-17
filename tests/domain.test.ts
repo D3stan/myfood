@@ -9,6 +9,7 @@ import type { State } from '../src/shared/types.ts';
 
 let clock: number;
 let app: ReturnType<typeof createApp>;
+let db: ReturnType<typeof openDb>;
 let cookie: Record<string, string>;
 
 async function req(method: string, path: string, body?: unknown, who = 'alice'): Promise<Response> {
@@ -32,7 +33,7 @@ const ev = (kind: string, lines: [number, number][], at = clock) =>
 
 beforeEach(async () => {
   clock = 1_000_000;
-  const db = openDb(':memory:');
+  db = openDb(':memory:');
   db.prepare('INSERT INTO users(name, emoji, code_hash, created_at) VALUES (?, ?, ?, 0)').run('Alice', '🦊', sha256('aaaa-aaaa-aaaa'));
   db.prepare('INSERT INTO users(name, emoji, code_hash, created_at) VALUES (?, ?, ?, 0)').run('Bob', '🐻', sha256('bbbb-bbbb-bbbb'));
   app = createApp({ db, runAi: async () => { throw new Error('no ai'); }, dataDir: mkdtempSync(join(tmpdir(), 'mf-')), build: 't', webDir: '/nonexistent', now: () => clock });
@@ -68,7 +69,7 @@ test('eat before buy still sums right, and a duplicate cid changes nothing', asy
   expect(stock(s, 'Eggs')).toBe(7);
 });
 
-test('adjust sets, later eat subtracts; level items are always set', async () => {
+test('level buys add containers, eat readings preserve spares, adjustments set totals, edits and undo replay', async () => {
   let s = await st('GET', '/api/state');
   const [eggs, salt] = [idOf(s, 'Eggs'), idOf(s, 'Salt')];
   await st('POST', '/api/events', ev('buy', [[eggs, 10]], 100));
@@ -76,9 +77,26 @@ test('adjust sets, later eat subtracts; level items are always set', async () =>
   s = await st('POST', '/api/events', ev('eat', [[eggs, 2]], 300));
   expect(stock(s, 'Eggs')).toBe(4);
   s = await st('POST', '/api/events', ev('buy', [[salt, 1]], 400));
+  s = await st('POST', '/api/events', ev('buy', [[salt, 1]], 450));
+  expect(stock(s, 'Salt')).toBe(2);
+  const reading = ev('eat', [[salt, 0.5]], 500);
+  s = await st('POST', '/api/events', reading);
+  expect(stock(s, 'Salt')).toBe(1.5);
+  s = await st('PATCH', `/api/events/${reading.cid}`, { lines: [{ item_id: salt, qty: 0 }] });
   expect(stock(s, 'Salt')).toBe(1);
-  s = await st('POST', '/api/events', ev('eat', [[salt, 0.25]], 500));
-  expect(stock(s, 'Salt')).toBe(0.25);
+  s = await st('DELETE', `/api/events/${reading.cid}`);
+  expect(stock(s, 'Salt')).toBe(2);
+  s = await st('POST', '/api/events', ev('adjust', [[salt, 2.5]], 600));
+  expect(stock(s, 'Salt')).toBe(2.5);
+  s = await st('POST', '/api/events', ev('buy', [[salt, 1]], 700));
+  expect(stock(s, 'Salt')).toBe(3.5);
+  const legacyBuy = ev('buy', [[salt, 1]], 800);
+  await st('POST', '/api/events', legacyBuy);
+  db.prepare('UPDATE event_lines SET is_set = 1 WHERE event_cid = ?').run(legacyBuy.cid);
+  s = await st('POST', '/api/events', ev('buy', [[salt, 1]], 900));
+  expect(stock(s, 'Salt')).toBe(2);
+  s = await st('PATCH', `/api/events/${legacyBuy.cid}`, { lines: [{ item_id: salt, qty: 1 }] });
+  expect(stock(s, 'Salt')).toBe(2);
 });
 
 test('the event time is capped at the server clock', async () => {

@@ -85,12 +85,17 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
     name: 'Pasta', emoji: '🍝', category: 'pantry', unit: 'g', step: 50, pack_size: 1000, low_at: 200,
     kcal_per_unit: 3.5, protein_per_unit: 0.12,
   });
+  const s2 = await st('POST', '/api/items', {
+    name: 'Salt', emoji: '🧂', category: 'spices', unit: 'level', step: 0.25, pack_size: 1, low_at: null,
+    kcal_per_unit: 500, protein_per_unit: 20,
+  });
   const beefId = s1.items.find(i => i.name === 'Minced beef')!.id;
   const pastaId = s1.items.find(i => i.name === 'Pasta')!.id;
+  const saltId = s2.items.find(i => i.name === 'Salt')!.id;
 
   await st('POST', '/api/events', {
     cid: 'seed-cook-1', at: clock - 10_000, kind: 'buy',
-    lines: [{ item_id: beefId, qty: 1000 }, { item_id: pastaId, qty: 1000 }],
+    lines: [{ item_id: beefId, qty: 1000 }, { item_id: pastaId, qty: 1000 }, { item_id: saltId, qty: 1.5 }],
   });
 
   // Cook 4 portions = 1200g (300g per portion); total kcal = 500*2 + 400*3.5 = 2400; protein = 500*0.2 + 400*0.12 = 148
@@ -101,7 +106,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
     emoji: '🍲',
     portions: 4,
     total_g: 1200,
-    ingredients: [{ item_id: beefId, qty: 500 }, { item_id: pastaId, qty: 400 }],
+    ingredients: [{ item_id: beefId, qty: 500 }, { item_id: pastaId, qty: 400 }, { item_id: saltId, qty: 0.25 }],
   });
 
   const meal = cooked.items.find(i => i.name === 'Bolognese')!;
@@ -119,6 +124,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
   });
   expect(cooked.items.find(i => i.id === beefId)!.stock).toBe(500);
   expect(cooked.items.find(i => i.id === pastaId)!.stock).toBe(600);
+  expect(cooked.items.find(i => i.id === saltId)!.stock).toBe(1.5);
   // Raw ingredients consumed with source='cook' do NOT count as eaten nutrition or usual
   expect(cooked.daily_nutrition).toEqual([]);
   expect(cooked.usual[beefId]).toBeUndefined();
@@ -286,12 +292,20 @@ test('web push: VAPID persisted, low-stock crossing & expiry pushes respect owne
   });
   const eggsId = sItems.items.find(i => i.name === 'Eggs')!.id;
   const barId = sItems.items.find(i => i.name === 'Protein bar')!.id;
+  const saltState = await st('POST', '/api/items', {
+    name: 'Salt', emoji: '🧂', category: 'spices', unit: 'level', step: 0.25, pack_size: 1, low_at: 0.25,
+  });
+  const saltId = saltState.items.find(i => i.name === 'Salt')!.id;
 
   // Buy above low_at
   await st('POST', '/api/events', {
     cid: 'push-seed', at: clock, kind: 'buy',
-    lines: [{ item_id: eggsId, qty: 5 }, { item_id: barId, qty: 3 }],
+    lines: [{ item_id: eggsId, qty: 5 }, { item_id: barId, qty: 3 }, { item_id: saltId, qty: 1.25 }],
   });
+  expect(pushed).toHaveLength(0);
+
+  await st('POST', '/api/events', { cid: 'push-level-out', at: clock + 500, kind: 'eat', lines: [{ item_id: saltId, qty: 0 }] });
+  expect((await st('GET', '/api/state')).items.find(i => i.id === saltId)!.stock).toBe(1);
   expect(pushed).toHaveLength(0);
 
   // Bob disables notify_low

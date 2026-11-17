@@ -6,9 +6,10 @@ import { expect, test } from 'vitest';
 import { z } from 'zod';
 import { openDb } from '../src/server/db.ts';
 import { addDays, daysUntil, isoDate, isoWeek, weekRange } from '../src/shared/dates.ts';
-import { applyOps, computeDailyNutrition, computeStock, eventNutrition, isExpiringSoon, isLow, portionCount, shown, toLines } from '../src/shared/stock.ts';
+import { applyOps, computeDailyNutrition, computeStock, eventNutrition, isExpiringSoon, isLow, levelParts, portionCount, shown, toLines } from '../src/shared/stock.ts';
 import { aliasKey, fmtCost, fmtNum, nameKey, parseCostCents, parseNum } from '../src/shared/text.ts';
 import { AiResult } from '../src/shared/types.ts';
+import { amount, levelName, levelReadLabel, lineText } from '../src/web/ui/components/bits.ts';
 import { fixture } from './fixture.ts';
 
 const d = (item_id: number, qty: number) => ({ item_id, qty, is_set: false });
@@ -28,15 +29,57 @@ test('a set replaces what came before and later deltas apply on top', () => {
   expect(computeStock([d(1, 10), d(1, -4), s(1, 6), d(1, -2)]).get(1)).toBe(4);
 });
 
+test('level eat set lines replace the open container and preserve sealed spares', () => {
+  const eat = (qty: number) => ({ ...s(1, qty), kind: 'eat' as const });
+  expect(computeStock([{ ...d(1, 1.5), kind: 'buy' as const }, eat(0)]).get(1)).toBe(1);
+  expect(computeStock([{ ...d(1, 2), kind: 'buy' as const }, eat(0.5)]).get(1)).toBe(1.5);
+  expect(computeStock([eat(0.5)]).get(1)).toBe(0.5);
+  expect(computeStock([{ ...d(1, -1), kind: 'buy' as const }, eat(0.25)]).get(1)).toBe(0.25);
+  expect(computeStock([{ ...d(1, 1), kind: 'buy' as const }, { ...s(1, 0.5), kind: 'eat' as const }]).get(1)).toBe(0.5);
+});
+
+test('levelParts labels open contents and sealed spares', () => {
+  expect(levelParts(1.5)).toEqual({ open: 0.5, sealed: 1 });
+  expect(levelParts(2)).toEqual({ open: 1, sealed: 1 });
+  expect(levelParts(0.25)).toEqual({ open: 0.25, sealed: 0 });
+  expect(levelParts(-1)).toEqual({ open: 0, sealed: 0 });
+});
+
+test('level labels report the open amount and spare count', () => {
+  const garlic = { ...fixture.items[6]!, emoji: '🧄', name: 'Garlic', stock: 1.5 };
+  expect(levelName(levelParts(1.5).open)).toBe('half');
+  expect(amount(garlic, 1.5)).toBe('half +1');
+  expect(levelReadLabel(garlic, 1.5)).toBe('🧄 Garlic: half +1');
+  expect(lineText([garlic], { item_id: garlic.id, qty: 0.5, is_set: true }, 'eat')).toBe('🧄 Garlic: half +1');
+});
+
 test('float noise is rounded away', () => {
   expect(computeStock([d(1, 0.1), d(1, 0.2)]).get(1)).toBe(0.3);
 });
 
-test('toLines: buy adds, eat removes, adjust sets, level items always set, unknown items dropped', () => {
+test('toLines: level buy adds, level eat sets, adjust sets, unknown items dropped', () => {
   const unit = (id: number) => (id === 7 ? 'level' : id === 1 ? 'pc' : undefined);
-  expect(toLines({ kind: 'buy', lines: [{ item_id: 1, qty: 10 }, { item_id: 7, qty: 1 }, { item_id: 99, qty: 1 }] }, unit)).toEqual([d(1, 10), s(7, 1)]);
-  expect(toLines({ kind: 'eat', lines: [{ item_id: 1, qty: 3 }] }, unit)).toEqual([d(1, -3)]);
+  expect(toLines({ kind: 'buy', lines: [{ item_id: 1, qty: 10 }, { item_id: 7, qty: 1 }, { item_id: 99, qty: 1 }] }, unit)).toEqual([d(1, 10), d(7, 1)]);
+  expect(toLines({ kind: 'eat', lines: [{ item_id: 1, qty: 3 }, { item_id: 7, qty: 0.5 }] }, unit)).toEqual([d(1, -3), s(7, 0.5)]);
   expect(toLines({ kind: 'adjust', lines: [{ item_id: 1, qty: 6 }] }, unit)).toEqual([s(1, 6)]);
+});
+
+test('set-to-value lines contribute no event or daily nutrition', () => {
+  const event = { ...fixture.events[0]!, kind: 'eat' as const, counts_nutrition: true, at: fixture.now, user_id: 1,
+    lines: [s(9, 0.5)] };
+  const levelItem = { id: 9, kcal_per_unit: 100, protein_per_unit: 25 };
+  expect(eventNutrition(event, [levelItem])).toEqual({ kcal: 0, protein_g: 0 });
+  expect(computeDailyNutrition([event], [levelItem])).toEqual([]);
+});
+
+test('pending level eat preserves spares, shows zero calories, and undo restores stock', () => {
+  const base = structuredClone(fixture);
+  base.items.push({ ...base.items[0]!, id: 99, unit: 'level', stock: 1.5, kcal_per_unit: 500, protein_per_unit: 10 });
+  const op = { type: 'event' as const, body: { cid: 'level-pending', at: fixture.now, kind: 'eat' as const, lines: [{ item_id: 99, qty: 0.5 }] } };
+  const out = applyOps(base, [op]);
+  expect(out.items.find(i => i.id === 99)!.stock).toBe(1.5);
+  expect(out.daily_nutrition.find(x => x.day === isoDate(fixture.now) && x.user_id === 1)).toBeUndefined();
+  expect(applyOps(out, [{ type: 'undo', cid: 'level-pending' }]).items.find(i => i.id === 99)!.stock).toBe(1.5);
 });
 
 test('applyOps shows pending work on top of server state and updates nutrition and expenses', () => {

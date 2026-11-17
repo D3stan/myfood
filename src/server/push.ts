@@ -70,11 +70,11 @@ function isGoneError(err: unknown): boolean {
 }
 
 function loadStockMap(db: Db): Map<number, number> {
-  const lines = all<{ item_id: number; qty: number; is_set: number }>(
+  const lines = all<{ item_id: number; qty: number; is_set: number; kind: 'eat' | 'buy' | 'adjust' }>(
     db,
-    `SELECT l.item_id, l.qty, l.is_set FROM event_lines l JOIN events e ON e.cid = l.event_cid
+    `SELECT l.item_id, l.qty, l.is_set, e.kind FROM event_lines l JOIN events e ON e.cid = l.event_cid
      WHERE e.undone_at IS NULL ORDER BY e.at, e.seq, l.rowid`,
-  ).map(l => ({ item_id: l.item_id, qty: l.qty, is_set: !!l.is_set }));
+  ).map(l => ({ item_id: l.item_id, qty: l.qty, is_set: !!l.is_set, kind: l.kind }));
   return computeStock(lines);
 }
 

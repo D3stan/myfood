@@ -181,6 +181,8 @@ export interface EventLine {
   item_id: number;
   qty: number;
   is_set: boolean;
+  /** Sealed containers immediately before a level eat reading; response metadata only. */
+  level_sealed_before?: number;
   cost_cents?: number | null;
   expires_at?: string | null;
   kcal?: number | null;
@@ -324,7 +326,8 @@ export type LineIn = z.infer<typeof LineIn>;
 
 /**
  * qty is never negative. What it means depends on kind and unit (see toLines in stock.ts):
- * buy adds, eat removes, adjust sets the stock to qty. On a `level` item qty is always the new level.
+ * buy adds, eat removes, adjust sets the stock to qty. For `level`, buy adds containers,
+ * eat sets the open container's level, and adjust sets the exact total container count.
  */
 export const EventBody = z.object({
   cid: z.string().min(8).max(64),

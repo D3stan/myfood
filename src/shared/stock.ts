@@ -1,6 +1,6 @@
 // The one place stock is computed. Server and web both use it, so they cannot disagree.
 import { daysUntil, isoDate } from './dates.ts';
-import type { DailyNutrition, EventBody, EventLine, FoodEvent, Item, PendingOp, State, Unit } from './types.ts';
+import type { DailyNutrition, EventBody, EventLine, FoodEvent, Item, Kind, PendingOp, State, Unit } from './types.ts';
 
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
@@ -8,14 +8,27 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 /** Stock as shown to people: never below zero. */
 export const shown = (stock: number): number => Math.max(0, round(stock));
 
+/** Split total level stock into the open container and sealed spares. */
+export function levelParts(stock: number): { open: number; sealed: number } {
+  if (stock <= 0) return { open: 0, sealed: 0 };
+  const sealed = Math.max(0, Math.ceil(round(stock)) - 1);
+  return { open: round(stock - sealed), sealed };
+}
+
+/** Replay one event line. A set line in an eat event changes only the open level container. */
+export function nextStock(prev: number, line: EventLine, kind?: Kind): number {
+  return round(line.is_set && kind === 'eat' ? levelParts(prev).sealed + line.qty
+    : line.is_set ? line.qty : prev + line.qty);
+}
+
 /**
  * Stock per item from event lines given oldest first (order by at, then seq), undone events left out.
- * A set line replaces the running amount; any other line adds its signed qty.
+ * Set lines replace the running amount except an eat set line, which replaces only the open level amount.
  * The result is not floored: eating before the receipt is logged must still add up afterwards.
  */
-export function computeStock(lines: Iterable<EventLine>): Map<number, number> {
+export function computeStock(lines: Iterable<EventLine & { kind?: Kind }>): Map<number, number> {
   const stock = new Map<number, number>();
-  for (const l of lines) stock.set(l.item_id, round(l.is_set ? l.qty : (stock.get(l.item_id) ?? 0) + l.qty));
+  for (const l of lines) stock.set(l.item_id, nextStock(stock.get(l.item_id) ?? 0, l, l.kind));
   return stock;
 }
 
@@ -25,7 +38,7 @@ export function toLines(body: Pick<EventBody, 'kind' | 'lines'>, unitOf: (itemId
   for (const l of body.lines) {
     const unit = unitOf(l.item_id);
     if (!unit) continue;
-    const line: EventLine = unit === 'level' || body.kind === 'adjust'
+    const line: EventLine = body.kind === 'adjust' || (unit === 'level' && body.kind === 'eat')
       ? { item_id: l.item_id, qty: l.qty, is_set: true }
       : { item_id: l.item_id, qty: body.kind === 'buy' ? l.qty : -l.qty, is_set: false };
     if (l.cost_cents != null) line.cost_cents = l.cost_cents;
@@ -47,6 +60,7 @@ export function eventLineNutrition(
   line: EventLine,
   item?: Pick<Item, 'kcal_per_unit' | 'protein_per_unit'>,
 ): { kcal: number; protein_g: number } {
+  if (line.is_set) return { kcal: 0, protein_g: 0 };
   const q = Math.abs(line.qty);
   const kcal = line.kcal != null ? line.kcal : (item?.kcal_per_unit != null ? q * item.kcal_per_unit : 0);
   const protein_g = line.protein_g != null ? line.protein_g : (item?.protein_per_unit != null ? q * item.protein_per_unit : 0);
@@ -132,7 +146,7 @@ export function applyOps(server: State, ops: PendingOp[]): State {
     const lines = toLines(b, id => byId.get(id)?.unit);
     for (const l of lines) {
       const it = byId.get(l.item_id)!;
-      it.stock = round(l.is_set ? l.qty : it.stock + l.qty);
+      it.stock = nextStock(it.stock, l, b.kind);
       if (b.kind === 'eat' && !l.is_set) {
         usual[l.item_id] = -l.qty;
         if (it.kcal_per_unit != null) l.kcal = Math.round(Math.abs(l.qty) * it.kcal_per_unit);
