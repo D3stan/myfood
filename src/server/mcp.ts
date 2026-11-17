@@ -66,6 +66,7 @@ interface ItemRowFull {
   kcal_per_unit: number | null;
   protein_per_unit: number | null;
   fat_per_unit: number | null;
+  carbs_per_unit: number | null;
   archived_at: number | null;
   created_at: number;
 }
@@ -101,6 +102,7 @@ interface EventLineRow {
   kcal: number | null;
   protein_g: number | null;
   fat_g: number | null;
+  carbs_g: number | null;
 }
 
 const csvCell = (value: unknown): string => {
@@ -171,6 +173,7 @@ function toHydratedItem(
     kcal_per_unit: row.kcal_per_unit,
     protein_per_unit: row.protein_per_unit,
     fat_per_unit: row.fat_per_unit,
+    carbs_per_unit: row.carbs_per_unit,
   };
   if (recipe) item.recipe = recipe;
   if (includeArchived) item.archived_at = row.archived_at;
@@ -185,7 +188,7 @@ function loadHydratedItems(db: Db, nowMs: number, includeArchived = false): Hydr
     db,
     `SELECT id, name, name_key, emoji, category, unit, step, pack_size, low_at,
             owner_id, is_cooked, portion_g, expires_at, shelf_life_days,
-            kcal_per_unit, protein_per_unit, fat_per_unit, archived_at, created_at
+            kcal_per_unit, protein_per_unit, fat_per_unit, carbs_per_unit, archived_at, created_at
      FROM items ${where}`,
   )
     .map(r => toHydratedItem(r, stockMap, recipes, nowMs, includeArchived))
@@ -198,7 +201,7 @@ function getHydratedItemById(db: Db, itemId: number, nowMs: number, includeArchi
     db,
     `SELECT id, name, name_key, emoji, category, unit, step, pack_size, low_at,
             owner_id, is_cooked, portion_g, expires_at, shelf_life_days,
-            kcal_per_unit, protein_per_unit, fat_per_unit, archived_at, created_at
+            kcal_per_unit, protein_per_unit, fat_per_unit, carbs_per_unit, archived_at, created_at
      FROM items WHERE ${where}`,
     itemId,
   );
@@ -220,7 +223,7 @@ function requireActiveItems(db: Db, itemIds: number[]): void {
 function hydrateEventLines(db: Db, cid: string) {
   return all<EventLineRow>(
     db,
-    'SELECT item_id, qty, is_set, cost_cents, expires_at, kcal, protein_g, fat_g FROM event_lines WHERE event_cid = ? ORDER BY rowid',
+    'SELECT item_id, qty, is_set, cost_cents, expires_at, kcal, protein_g, fat_g, carbs_g FROM event_lines WHERE event_cid = ? ORDER BY rowid',
     cid,
   ).map(l => ({
     item_id: l.item_id,
@@ -231,6 +234,7 @@ function hydrateEventLines(db: Db, cid: string) {
     ...(l.kcal !== null ? { kcal: l.kcal } : {}),
     ...(l.protein_g !== null ? { protein_g: l.protein_g } : {}),
     ...(l.fat_g !== null ? { fat_g: l.fat_g } : {}),
+    ...(l.carbs_g !== null ? { carbs_g: l.carbs_g } : {}),
   }));
 }
 
@@ -820,6 +824,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     kcal_per_unit: ItemBody.shape.kcal_per_unit.describe('Calories per 1 unit'),
     protein_per_unit: ItemBody.shape.protein_per_unit.describe('Protein (g) per 1 unit'),
     fat_per_unit: ItemBody.shape.fat_per_unit.describe('Fat (g) per 1 unit'),
+    carbs_per_unit: ItemBody.shape.carbs_per_unit.describe('Carbs (g) per 1 unit'),
     barcode: ItemBody.shape.barcode.describe('Optional 6-14 digit barcode to link'),
   };
   const CreateItemArgs = z.object(createItemShape);
@@ -841,6 +846,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     kcal_per_unit: ItemPatch.shape.kcal_per_unit.describe('Updated kcal_per_unit'),
     protein_per_unit: ItemPatch.shape.protein_per_unit.describe('Updated protein_per_unit'),
     fat_per_unit: ItemPatch.shape.fat_per_unit.describe('Updated fat_per_unit'),
+    carbs_per_unit: ItemPatch.shape.carbs_per_unit.describe('Updated carbs_per_unit'),
     barcode: ItemPatch.shape.barcode.describe('Optional 6-14 digit barcode to link'),
   };
   const UpdateItemArgs = z.object(updateItemShape);
@@ -1066,6 +1072,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         kcal_total: CookBody.shape.kcal_total.describe('Fallback total kcal, used only when no ingredient has calorie data (otherwise summed from ingredients)'),
         protein_total: CookBody.shape.protein_total.describe('Fallback total protein (g), used only when no ingredient has protein data (otherwise summed from ingredients)'),
         fat_total: CookBody.shape.fat_total.describe('Fallback total fat (g), used only when no ingredient has fat data (otherwise summed from ingredients)'),
+        carbs_total: CookBody.shape.carbs_total.describe('Fallback total carbs (g), used only when no ingredient has carbs data (otherwise summed from ingredients)'),
         ingredients: z.array(McpCookIngredientIn).max(30).optional().describe('Raw ingredients consumed, each with item_id or item (name) (defaults to [])'),
         at: z.number().int().positive().optional().describe('Optional unix ms timestamp (default now)'),
         cid: CookBody.shape.cid.optional().describe('Optional idempotency batch cid'),
@@ -1094,6 +1101,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         kcal_total: args.kcal_total ?? null,
         protein_total: args.protein_total ?? null,
         fat_total: args.fat_total ?? null,
+        carbs_total: args.carbs_total ?? null,
         ingredients: resolveLines(db, 'ingredients', args.ingredients ?? [], uid),
       });
       const res = d.applyCookBatch(db, uid, body, {
@@ -1354,19 +1362,20 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     'set_settings',
     {
       title: 'Update Household or User Settings',
-      description: 'Update household currency and/or a user notification preferences (notify_low, notify_expiry).',
+      description: 'Update household currency and/or a user notification preferences (notify_low, notify_expiry) and daily nutrition goals (goals: kcal, protein_g, fat_g, carbs_g; null clears one).',
       inputSchema: {
         currency: SettingsBody.shape.currency.optional().describe('Household currency code/symbol'),
         user_id: z.number().int().positive().optional().describe('User ID when updating notify_low or notify_expiry'),
         notify_low: MeBody.shape.notify_low.describe('Enable/disable low-stock notifications'),
         notify_expiry: MeBody.shape.notify_expiry.describe('Enable/disable expiry notifications'),
+        goals: MeBody.shape.goals.describe('Daily nutrition goals; omitted keys unchanged, null clears'),
       },
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
     },
     (args) => runTool(() => {
-      const hasUserUpdate = args.notify_low !== undefined || args.notify_expiry !== undefined;
+      const hasUserUpdate = args.notify_low !== undefined || args.notify_expiry !== undefined || args.goals !== undefined;
       if (args.currency === undefined && !hasUserUpdate) {
-        d.fail(400, 'Provide currency, notify_low, and/or notify_expiry');
+        d.fail(400, 'Provide currency, notify_low, notify_expiry, and/or goals');
       }
       if (args.currency !== undefined) {
         d.patchSettings(db, SettingsBody.parse({ currency: args.currency }));
@@ -1381,6 +1390,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
             stripUndefined({
               notify_low: args.notify_low,
               notify_expiry: args.notify_expiry,
+              goals: args.goals,
             }),
           ),
         );

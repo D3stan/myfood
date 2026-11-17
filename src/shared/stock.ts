@@ -79,12 +79,12 @@ export function applyOps(server: State, ops: PendingOp[]): State {
   const dailyMap = new Map<string, DailyNutrition>(
     server.daily_nutrition.map(d => [`${d.day}:${d.user_id}`, { ...d }]),
   );
-  const bumpDaily = (day: string, user_id: number, dk: number, dp: number, df: number) => {
-    if (!dk && !dp && !df) return;
+  const bumpDaily = (day: string, user_id: number, dk: number, dp: number, df: number, dc: number | null) => {
+    if (!dk && !dp && !df && !dc) return;
     const k = `${day}:${user_id}`;
     const cur = dailyMap.get(k);
-    if (cur) { cur.kcal = Math.max(0, Math.round(cur.kcal + dk)); cur.protein_g = Math.max(0, round1(cur.protein_g + dp)); cur.fat_g = Math.max(0, round1((cur.fat_g ?? 0) + df)); }
-    else if (dk > 0 || dp > 0 || df > 0) dailyMap.set(k, { day, user_id, kcal: Math.round(dk), protein_g: round1(dp), fat_g: round1(df) });
+    if (cur) { cur.kcal = Math.max(0, Math.round(cur.kcal + dk)); cur.protein_g = Math.max(0, round1(cur.protein_g + dp)); cur.fat_g = Math.max(0, round1((cur.fat_g ?? 0) + df)); if (dc != null) cur.carbs_g = Math.max(0, round1((cur.carbs_g ?? 0) + dc)); }
+    else if (dk > 0 || dp > 0 || df > 0 || (dc ?? 0) > 0) dailyMap.set(k, { day, user_id, kcal: Math.round(dk), protein_g: round1(dp), fat_g: round1(df), carbs_g: dc == null ? null : round1(dc) });
   };
 
   for (const op of ops) {
@@ -94,7 +94,7 @@ export function applyOps(server: State, ops: PendingOp[]): State {
       // shortcut: a set line cannot be reversed locally (the earlier amount is unknown), the server's answer fixes it.
       for (const l of ev.lines) { const it = byId.get(l.item_id); if (it && !l.is_set) it.stock = round(it.stock - l.qty); }
       const n = eventNutrition(ev, items);
-      bumpDaily(isoDate(ev.at), ev.user_id, -n.kcal, -n.protein_g, -n.fat_g);
+      bumpDaily(isoDate(ev.at), ev.user_id, -n.kcal, -n.protein_g, -n.fat_g, n.carbs_g == null ? null : -n.carbs_g);
       events = events.filter(e => e.cid !== op.cid);
       expenses = expenses.filter(e => e.cid !== op.cid);
       continue;
@@ -110,6 +110,7 @@ export function applyOps(server: State, ops: PendingOp[]): State {
         if (it.kcal_per_unit != null) l.kcal = Math.round(Math.abs(l.qty) * it.kcal_per_unit);
         if (it.protein_per_unit != null) l.protein_g = round1(Math.abs(l.qty) * it.protein_per_unit);
         if (it.fat_per_unit != null) l.fat_g = round1(Math.abs(l.qty) * it.fat_per_unit);
+        if (it.carbs_per_unit != null) l.carbs_g = round1(Math.abs(l.qty) * it.carbs_per_unit);
       }
     }
     const ev: FoodEvent = {
@@ -119,7 +120,7 @@ export function applyOps(server: State, ops: PendingOp[]): State {
       counts_nutrition: true, lines,
     };
     const n = eventNutrition(ev, items);
-    bumpDaily(isoDate(ev.at), ev.user_id, n.kcal, n.protein_g, n.fat_g);
+    bumpDaily(isoDate(ev.at), ev.user_id, n.kcal, n.protein_g, n.fat_g, n.carbs_g);
     events = [ev, ...events];
     if (ev.cost_cents != null) expenses = [ev, ...expenses];
   }

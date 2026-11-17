@@ -145,4 +145,14 @@ export function migrate(db: Db): void {
       db.exec('PRAGMA user_version = 2');
     });
   }
+
+  if (version < 3) {
+    transaction(db, () => {
+      addCol(db, 'items', 'carbs_per_unit', 'REAL');
+      addCol(db, 'event_lines', 'carbs_g', 'REAL');
+      addCol(db, 'barcodes', 'carbs_per_unit', 'REAL');
+      for (const c of ['goal_kcal', 'goal_protein_g', 'goal_fat_g', 'goal_carbs_g']) addCol(db, 'users', c, 'REAL');
+      db.exec('PRAGMA user_version = 3');
+    });
+  }
 }

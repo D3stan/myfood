@@ -1,8 +1,9 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, expect, test } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
 import { sha256 } from '../src/server/auth.ts';
+import { defaultBarcodeLookup } from '../src/server/barcodes.ts';
 import type { BarcodeLookupFn } from '../src/server/barcodes.ts';
 import { openDb } from '../src/server/db.ts';
 import type { Db } from '../src/server/db.ts';
@@ -79,11 +80,11 @@ beforeEach(async () => {
 test('cook batch: portions+grams computes portion_g, macros from ingredients, counts_nutrition=0, skips usual, saves recipe', async () => {
   const s0 = await st('POST', '/api/items', {
     name: 'Minced beef', emoji: '🥩', category: 'meat', unit: 'g', step: 50, pack_size: 500, low_at: null,
-    kcal_per_unit: 2.0, protein_per_unit: 0.2, fat_per_unit: 0.15,
+    kcal_per_unit: 2.0, protein_per_unit: 0.2, fat_per_unit: 0.15, carbs_per_unit: 0.02,
   });
   const s1 = await st('POST', '/api/items', {
     name: 'Pasta', emoji: '🍝', category: 'pantry', unit: 'g', step: 50, pack_size: 1000, low_at: 200,
-    kcal_per_unit: 3.5, protein_per_unit: 0.12, fat_per_unit: 0.01,
+    kcal_per_unit: 3.5, protein_per_unit: 0.12, fat_per_unit: 0.01, carbs_per_unit: 0.7,
   });
   const s2 = await st('POST', '/api/items', {
     name: 'Salt', emoji: '🧂', category: 'spices', unit: 'level', step: 0.25, pack_size: 1, low_at: null,
@@ -98,7 +99,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
     lines: [{ item_id: beefId, qty: 1000 }, { item_id: pastaId, qty: 1000 }, { item_id: saltId, qty: 1.5 }],
   });
 
-  // Cook 4 portions = 1200g (300g per portion); total kcal = 500*2 + 400*3.5 = 2400; protein = 500*0.2 + 400*0.12 = 148; fat = 500*0.15 + 400*0.01 = 79.
+  // Cook 4 portions = 1200g (300g per portion); total kcal = 500*2 + 400*3.5 = 2400; protein = 500*0.2 + 400*0.12 = 148; fat = 500*0.15 + 400*0.01 = 79; carbs = 500*0.02 + 400*0.7 = 290.
   // A typed (wrong) total must lose against the ingredients.
   const cooked = await st('POST', '/api/meals/cook', {
     cid: 'cook-batch-1',
@@ -107,7 +108,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
     emoji: '🍲',
     portions: 4,
     total_g: 1200,
-    kcal_total: 99999, protein_total: 99999, fat_total: 99999,
+    kcal_total: 99999, protein_total: 99999, fat_total: 99999, carbs_total: 99999,
     ingredients: [{ item_id: beefId, qty: 500 }, { item_id: pastaId, qty: 400 }, { item_id: saltId, qty: 0.25 }],
   });
 
@@ -123,6 +124,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
     kcal_per_unit: 2,
     protein_per_unit: 0.1233,
     fat_per_unit: 0.0658,
+    carbs_per_unit: 0.2417,
     recipe: [{ item_id: beefId, qty: 500 }, { item_id: pastaId, qty: 400 }],
   });
   expect(cooked.items.find(i => i.id === beefId)!.stock).toBe(500);
@@ -140,7 +142,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
   });
   expect(afterEat.items.find(i => i.id === meal.id)!.stock).toBe(900);
   expect(afterEat.usual[meal.id]).toBe(300);
-  expect(afterEat.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: afterEat.me.id, kcal: 600, protein_g: 37, fat_g: 19.7 }]);
+  expect(afterEat.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: afterEat.me.id, kcal: 600, protein_g: 37, fat_g: 19.7, carbs_g: 72.5 }]);
   expect(s0.rev).toBeLessThan(afterEat.rev);
 
   // Archiving an ingredient prunes it from meal_recipes so cookSheet has no stale Unknown line
@@ -437,4 +439,54 @@ test('shortcut modes: ai always asks the AI; log matches presets and cooked meal
   expect(s.items.find(i => i.id === eggsId)!.stock).toBe(6);
   expect(s.items.find(i => i.name === 'Chili')!.stock).toBe(600);
   expect(aiCalls).toBe(1);
+});
+
+test('carbs: eat snapshots known carbs, unknown stays null (never 0), daily carbs_g sums only known', async () => {
+  await st('POST', '/api/items', { name: 'Rice', emoji: '🍚', category: 'pantry', unit: 'g', step: 50, pack_size: 1000, low_at: null, carbs_per_unit: 0.28 });
+  const s1 = await st('POST', '/api/items', { name: 'Zero', emoji: '🧂', category: 'pantry', unit: 'g', step: 50, pack_size: 1000, low_at: null, kcal_per_unit: 1, carbs_per_unit: 0 });
+  const s2 = await st('POST', '/api/items', { name: 'Mystery', emoji: '❓', category: 'pantry', unit: 'g', step: 50, pack_size: 1000, low_at: null, kcal_per_unit: 2 });
+  const [rice, zero, mystery] = ['Rice', 'Zero', 'Mystery'].map(n => s2.items.find(i => i.name === n)!.id);
+  expect(s1.items.find(i => i.name === 'Zero')!.carbs_per_unit).toBe(0);
+  expect(s2.items.find(i => i.name === 'Mystery')!.carbs_per_unit).toBeNull();
+
+  // Only an unknown-carbs line today: carbs_g is null, not 0.
+  const e1 = await st('POST', '/api/events', { cid: 'carb-eat-1', at: clock, kind: 'eat', lines: [{ item_id: mystery!, qty: 100 }] });
+  expect(e1.events[0]!.lines[0]!.carbs_g).toBeUndefined();
+  expect(e1.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: e1.me.id, kcal: 200, protein_g: 0, fat_g: 0, carbs_g: null }]);
+
+  // A known zero is a real 0; known carbs are summed, the unknown line adds nothing.
+  await st('POST', '/api/events', { cid: 'carb-eat-2', at: clock + 1, kind: 'eat', lines: [{ item_id: zero!, qty: 100 }] });
+  expect((await st('GET', '/api/state')).daily_nutrition[0]!.carbs_g).toBe(0);
+  const e3 = await st('POST', '/api/events', { cid: 'carb-eat-3', at: clock + 2, kind: 'eat', lines: [{ item_id: rice!, qty: 150 }] });
+  expect(e3.events.find(e => e.cid === 'carb-eat-3')!.lines[0]!.carbs_g).toBe(42);
+  expect(e3.daily_nutrition[0]!.carbs_g).toBe(42);
+
+  // The snapshot survives a later rate change.
+  const e4 = await st('PATCH', `/api/items/${rice}`, { carbs_per_unit: 1 });
+  expect(e4.daily_nutrition[0]!.carbs_g).toBe(42);
+});
+
+test('patchMe goals: set, partial update leaves others, null clears', async () => {
+  const s1 = await st('PATCH', '/api/me', { goals: { kcal: 2200, protein_g: 140, fat_g: 70, carbs_g: 250 } });
+  expect(s1.me.goals).toEqual({ kcal: 2200, protein_g: 140, fat_g: 70, carbs_g: 250 });
+  const s2 = await st('PATCH', '/api/me', { goals: { kcal: 2000, fat_g: null } });
+  expect(s2.me.goals).toEqual({ kcal: 2000, protein_g: 140, fat_g: null, carbs_g: 250 });
+  expect((await st('GET', '/api/state', undefined, 'bob')).me.goals).toEqual({ kcal: null, protein_g: null, fat_g: null, carbs_g: null });
+  expect((await req('PATCH', '/api/me', { goals: { kcal: 0 } })).status).toBe(400);
+});
+
+test('barcode lookup parses OpenFoodFacts carbohydrates (per 100g, per serving) and leaves missing as null', async () => {
+  const off = (product: Record<string, unknown>) => vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ status: 1, product })));
+  try {
+    off({ product_name: 'Muesli', quantity: '500 g', nutriments: { 'energy-kcal_100g': 370, carbohydrates_100g: 60.5 } });
+    expect((await defaultBarcodeLookup('5701234567890'))!.carbs_per_unit).toBe(0.605);
+    off({ product_name: 'Bar', quantity: '3 bars', serving_quantity: 40, nutriments: { carbohydrates_serving: 22.46 } });
+    expect((await defaultBarcodeLookup('5701234567891'))!.carbs_per_unit).toBe(22.46);
+    off({ product_name: 'Bar2', quantity: '3 bars', serving_quantity: 40, nutriments: { carbohydrates_100g: 50 } });
+    expect((await defaultBarcodeLookup('5701234567892'))!.carbs_per_unit).toBe(20);
+    off({ product_name: 'Plain', quantity: '1 kg', nutriments: {} });
+    expect((await defaultBarcodeLookup('5701234567893'))!.carbs_per_unit).toBeNull();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

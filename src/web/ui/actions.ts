@@ -226,7 +226,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
     stopScanner(s);
     openSheet(s, { t: 'itemForm', q: {} }, {
       name: '', emoji: '🥫', category: 'pantry', unit: 'pc', step: '1', pack: '1',
-      low: '', start: '', itemOwner: 'shared', itemExpiry: '', itemKcal: '', itemProtein: '', itemFat: '',
+      low: '', start: '', itemOwner: 'shared', itemExpiry: '', itemKcal: '', itemProtein: '', itemFat: '', itemCarbs: '',
     });
   },
   openAudit: () => {
@@ -326,10 +326,10 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
     const sh = sheet(), f = s.ui.f, isNew = sh.t === 'itemForm';
     const step = parseNum(f.step ?? ''), pack = parseNum(f.pack ?? '');
     const low = parseOptNum(f.low), start = (f.start ?? '').trim() ? parseNum(f.start!) : 0;
-    const kcalIn = parseOptNum(f.itemKcal), proteinIn = parseOptNum(f.itemProtein), fatIn = parseOptNum(f.itemFat);
+    const kcalIn = parseOptNum(f.itemKcal), proteinIn = parseOptNum(f.itemProtein), fatIn = parseOptNum(f.itemFat), carbsIn = parseOptNum(f.itemCarbs);
     const exp = (f.itemExpiry ?? '').trim();
     if (!f.name?.trim() || !(step > 0) || !(pack > 0) || low === 'invalid' || Number.isNaN(start)
-      || kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || (exp && !ISO_DATE_RE.test(exp))) {
+      || kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || carbsIn === 'invalid' || (exp && !ISO_DATE_RE.test(exp))) {
       return void toast('Check the name and the numbers');
     }
     const name = f.name.trim();
@@ -344,6 +344,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
       kcal_per_unit: kcalIn == null ? null : Math.round((kcalIn / mult) * 1000) / 1000,
       protein_per_unit: proteinIn == null ? null : Math.round((proteinIn / mult) * 1000) / 1000,
       fat_per_unit: fatIn == null ? null : Math.round((fatIn / mult) * 1000) / 1000,
+      carbs_per_unit: carbsIn == null ? null : Math.round((carbsIn / mult) * 1000) / 1000,
     };
     if (!(await mutate(isNew ? 'POST' : 'PATCH', isNew ? '/api/items' : `/api/items/${sh.id}`, body))) return;
     const made = isNew && start > 0 ? findCreatedItem(st().items, name, body.owner_id) : undefined;
@@ -416,8 +417,8 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
     if (portions == null && total_g == null) return void toast('Enter portions, total grams, or both');
     const exp = (f.cookExpiry ?? '').trim();
     if (exp && !ISO_DATE_RE.test(exp)) return void toast('Check expiry date');
-    const kcalIn = parseOptNum(f.cookKcal), proteinIn = parseOptNum(f.cookProtein), fatIn = parseOptNum(f.cookFat);
-    if (kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid') return void toast('Check calories, protein and fat');
+    const kcalIn = parseOptNum(f.cookKcal), proteinIn = parseOptNum(f.cookProtein), fatIn = parseOptNum(f.cookFat), carbsIn = parseOptNum(f.cookCarbs);
+    if (kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || carbsIn === 'invalid') return void toast('Check calories, protein, fat and carbs');
     const ids = sh.lines ?? [];
     const auto = cookBatchMacros(st().items, ids, sh.q);
     const ingredients = ids.map(id => ({ item_id: id, qty: qOf(sh, String(id)) })).filter(l => l.qty > 0);
@@ -437,6 +438,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
         kcal_total: kcalIn != null ? kcalIn : (auto.hasKcal ? auto.kcal : null),
         protein_total: proteinIn != null ? proteinIn : (auto.hasProtein ? auto.protein : null),
         fat_total: fatIn != null ? fatIn : (auto.hasFat ? auto.fat : null),
+        carbs_total: carbsIn != null ? carbsIn : (auto.hasCarbs ? auto.carbs : null),
         ingredients,
       });
       receive(s, next);
@@ -494,9 +496,9 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
     if (!navigator.onLine) return void toast("You're offline");
     const name = (f.bcName ?? '').trim();
     const pack = parseNum(f.bcPack ?? '');
-    const kcalIn = parseOptNum(f.bcKcal), proteinIn = parseOptNum(f.bcProtein), fatIn = parseOptNum(f.bcFat);
+    const kcalIn = parseOptNum(f.bcKcal), proteinIn = parseOptNum(f.bcProtein), fatIn = parseOptNum(f.bcFat), carbsIn = parseOptNum(f.bcCarbs);
     const cost_cents = parseOptCostCents(f.buyCost);
-    if (!name || !(pack > 0) || kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || cost_cents === 'invalid') {
+    if (!name || !(pack > 0) || kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || carbsIn === 'invalid' || cost_cents === 'invalid') {
       return void toast('Check the name, pack size, and numbers');
     }
     const unit = (UNITS.includes(f.bcUnit as Unit) ? f.bcUnit : 'g') as Unit;
@@ -509,6 +511,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
       kcal_per_unit: kcalIn == null ? null : Math.round((kcalIn / mult) * 1000) / 1000,
       protein_per_unit: proteinIn == null ? null : Math.round((proteinIn / mult) * 1000) / 1000,
       fat_per_unit: fatIn == null ? null : Math.round((fatIn / mult) * 1000) / 1000,
+      carbs_per_unit: carbsIn == null ? null : Math.round((carbsIn / mult) * 1000) / 1000,
       ...(lk?.code ? { barcode: lk.code } : {}),
     };
     const qty = bcTotal(qOf(sheet(), 'bc'), bcModeOf(f, unit, pack), unit, pack);

@@ -48,6 +48,7 @@ export const NewItem = z.object({
   kcal_per_unit: amount.nullish(),
   protein_per_unit: amount.nullish(),
   fat_per_unit: amount.nullish(),
+  carbs_per_unit: amount.nullish(),
   expires_in_days: z.number().int().min(0).max(3650).nullish(),
 });
 export type NewItem = z.infer<typeof NewItem>;
@@ -93,6 +94,7 @@ export const AiCook = z.object({
   kcal_total: amount.nullable(),
   protein_total: amount.nullable(),
   fat_total: amount.nullish(),
+  carbs_total: amount.nullish(),
   ingredients: z.array(AiCookIngredient).max(30),
 });
 export type AiCook = z.infer<typeof AiCook>;
@@ -147,7 +149,8 @@ export interface AiInput {
 // ---- entities as the API returns them ----
 
 export interface User { id: number; name: string; emoji: string }
-export interface Me extends User { notify_low: boolean; notify_expiry: boolean }
+export interface Goals { kcal: number | null; protein_g: number | null; fat_g: number | null; carbs_g: number | null }
+export interface Me extends User { notify_low: boolean; notify_expiry: boolean; goals: Goals }
 
 export interface Item {
   id: number;
@@ -175,6 +178,7 @@ export interface Item {
   kcal_per_unit: number | null;
   protein_per_unit: number | null;
   fat_per_unit: number | null;
+  carbs_per_unit: number | null;
   /** Last saved ingredients for a cooked meal item. */
   recipe?: { item_id: number; qty: number }[];
 }
@@ -191,6 +195,7 @@ export interface EventLine {
   kcal?: number | null;
   protein_g?: number | null;
   fat_g?: number | null;
+  carbs_g?: number | null;
 }
 
 export interface FoodEvent {
@@ -261,6 +266,8 @@ export interface DailyNutrition {
   kcal: number;
   protein_g: number;
   fat_g: number;
+  /** null = no counted line that day had carbs data. */
+  carbs_g: number | null;
 }
 
 export interface BarcodeProduct {
@@ -272,6 +279,7 @@ export interface BarcodeProduct {
   kcal_per_unit: number | null;
   protein_per_unit: number | null;
   fat_per_unit?: number | null;
+  carbs_per_unit?: number | null;
   category: Category;
   source: 'manual' | 'openfoodfacts';
 }
@@ -368,6 +376,7 @@ export const ItemBody = z.object({
   kcal_per_unit: amount.nullish(),
   protein_per_unit: amount.nullish(),
   fat_per_unit: amount.nullish(),
+  carbs_per_unit: amount.nullish(),
   barcode: z.string().trim().regex(/^\d{6,14}$/).nullish(),
 });
 export type ItemBody = z.infer<typeof ItemBody>;
@@ -381,11 +390,14 @@ export const PresetBody = z.object({
 });
 export type PresetBody = z.infer<typeof PresetBody>;
 
+/** null clears a goal. */
+const goal = z.number().positive().max(100000).nullable().optional();
 export const MeBody = z.object({
   name: name.optional(),
   emoji: emoji.optional(),
   notify_low: z.boolean().optional(),
   notify_expiry: z.boolean().optional(),
+  goals: z.object({ kcal: goal, protein_g: goal, fat_g: goal, carbs_g: goal }).optional(),
 });
 export type MeBody = z.infer<typeof MeBody>;
 
@@ -417,6 +429,7 @@ export const CookBody = z.object({
   kcal_total: amount.nullish(),
   protein_total: amount.nullish(),
   fat_total: amount.nullish(),
+  carbs_total: amount.nullish(),
   ingredients: z.array(CookIngredientIn).max(30),
 });
 export type CookBody = z.infer<typeof CookBody>;

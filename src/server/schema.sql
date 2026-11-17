@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS users (
   code_hash TEXT NOT NULL UNIQUE,   -- sha256 hex of the access code
   notify_low INTEGER NOT NULL DEFAULT 1,
   notify_expiry INTEGER NOT NULL DEFAULT 1,
+  goal_kcal REAL,                   -- NULL = no goal
+  goal_protein_g REAL,
+  goal_fat_g REAL,
+  goal_carbs_g REAL,
   created_at INTEGER NOT NULL
 );
 
@@ -38,6 +42,7 @@ CREATE TABLE IF NOT EXISTS items (
   kcal_per_unit REAL,
   protein_per_unit REAL,
   fat_per_unit REAL,
+  carbs_per_unit REAL,
   archived_at INTEGER,
   created_at INTEGER NOT NULL
 );
@@ -74,7 +79,8 @@ CREATE TABLE IF NOT EXISTS event_lines (
   expires_at TEXT,
   kcal REAL,
   protein_g REAL,
-  fat_g REAL
+  fat_g REAL,
+  carbs_g REAL
 );
 CREATE INDEX IF NOT EXISTS event_lines_event ON event_lines(event_cid);
 
@@ -157,6 +163,7 @@ CREATE TABLE IF NOT EXISTS barcodes (
   kcal_per_unit REAL,
   protein_per_unit REAL,
   fat_per_unit REAL,
+  carbs_per_unit REAL,
   source TEXT NOT NULL,
   raw_json TEXT,
   updated_at INTEGER NOT NULL

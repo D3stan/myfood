@@ -60,6 +60,7 @@ if (mode === 'slow') {
         kcal_per_unit: 7.17,
         protein_per_unit: 0.008,
         fat_per_unit: 0.81,
+        carbs_per_unit: 0.006,
         expires_in_days: 30,
       },
       qty: 250,
@@ -90,6 +91,7 @@ if (mode === 'slow') {
         owner: /\bmy\b/i.test(user) ? 'mine' : 'shared',
         kcal_total: ingredients.length ? null : 1600,
         protein_total: ingredients.length ? null : 110,
+        carbs_total: ingredients.length ? null : 150,
         ingredients,
       }],
     };

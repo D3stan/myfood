@@ -186,8 +186,8 @@ function newItemId(db: Db, n: NewItem, userId: number, nowMs: number): number {
   return Number(
     run(
       db,
-      `INSERT INTO items(name, name_key, emoji, category, unit, step, pack_size, low_at, owner_id, shelf_life_days, kcal_per_unit, protein_per_unit, fat_per_unit, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO items(name, name_key, emoji, category, unit, step, pack_size, low_at, owner_id, shelf_life_days, kcal_per_unit, protein_per_unit, fat_per_unit, carbs_per_unit, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
       n.name,
       key,
       n.emoji,
@@ -200,6 +200,7 @@ function newItemId(db: Db, n: NewItem, userId: number, nowMs: number): number {
       n.kcal_per_unit ?? null,
       n.protein_per_unit ?? null,
       n.fat_per_unit ?? null,
+      n.carbs_per_unit ?? null,
       nowMs,
     ).lastInsertRowid,
   );
@@ -301,6 +302,7 @@ function applyProposalToDb(
         kcal_total: c.kcal_total,
         protein_total: c.protein_total,
         fat_total: c.fat_total,
+        carbs_total: c.carbs_total,
         ingredients: c.ingredients,
       };
       const res = applyCookBatch(db, userId, cookBody, {

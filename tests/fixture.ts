@@ -19,7 +19,7 @@ const base = (
 ): Item => ({
   id, name, emoji, category, unit, step, pack_size, low_at, stock,
   owner_id: null, is_cooked: false, portion_g: null, expires_at: null,
-  shelf_life_days: null, kcal_per_unit: null, protein_per_unit: null, fat_per_unit: null,
+  shelf_life_days: null, kcal_per_unit: null, protein_per_unit: null, fat_per_unit: null, carbs_per_unit: null,
   ...extra,
 });
 
@@ -35,7 +35,7 @@ const buyEv = {
 
 export const fixture: State = {
   rev: 42, build: 'dev', now,
-  me: { id: 1, name: 'Sam', emoji: '🦊', notify_low: true, notify_expiry: true },
+  me: { id: 1, name: 'Sam', emoji: '🦊', notify_low: true, notify_expiry: true, goals: { kcal: null, protein_g: null, fat_g: null, carbs_g: null } },
   users: [{ id: 1, name: 'Sam', emoji: '🦊' }, { id: 2, name: 'Robin', emoji: '🐻' }],
   items: [
     base(1, 'Eggs', '🥚', 'dairy', 'pc', 1, 10, 3, 7, { expires_at: inDays(10), shelf_life_days: 21, kcal_per_unit: 78, protein_per_unit: 6.3 }),
@@ -85,8 +85,8 @@ export const fixture: State = {
   expense_locks: [{ period: isoWeek(now - 7 * 86_400_000), locked_by: 1, locked_at: now - 86_400_000, total_cents: 45000, event_count: 3, note: null }],
   expenses: [buyEv],
   daily_nutrition: [
-    { day: isoDate(now - 3_600_000 * 11), user_id: 2, kcal: 875, protein_g: 30, fat_g: 0 },
-    { day: isoDate(now - 3_600_000 * 24), user_id: 1, kcal: 657, protein_g: 40.2, fat_g: 0 },
+    { day: isoDate(now - 3_600_000 * 11), user_id: 2, kcal: 875, protein_g: 30, fat_g: 0, carbs_g: null },
+    { day: isoDate(now - 3_600_000 * 24), user_id: 1, kcal: 657, protein_g: 40.2, fat_g: 0, carbs_g: null },
   ],
   guest_code: 'abcd-2345',
 };

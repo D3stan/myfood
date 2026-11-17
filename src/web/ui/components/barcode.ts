@@ -173,6 +173,7 @@ export function barcodeToFields(lk: BarcodeLookup): Record<string, string> {
     bcKcal: p?.kcal_per_unit != null ? fmtNum(p.kcal_per_unit * mult) : '',
     bcProtein: p?.protein_per_unit != null ? fmtNum(p.protein_per_unit * mult) : '',
     bcFat: p?.fat_per_unit != null ? fmtNum(p.fat_per_unit * mult) : '',
+    bcCarbs: p?.carbs_per_unit != null ? fmtNum(p.carbs_per_unit * mult) : '',
     buyCost: '',
   };
 }
@@ -242,6 +243,8 @@ export function barcodeSheet(v: V, _sh: Sheet) {
               <input id="f-bcProtein" type="text" inputmode="decimal" data-f="bcProtein" value="${ui.f.bcProtein ?? ''}" autocomplete="off"></div>
             <div class="grow"><label class="field" for="f-bcFat">Fat g / ${macroLabel}</label>
               <input id="f-bcFat" type="text" inputmode="decimal" data-f="bcFat" value="${ui.f.bcFat ?? ''}" autocomplete="off"></div>
+            <div class="grow"><label class="field" for="f-bcCarbs">Carbs g / ${macroLabel}</label>
+              <input id="f-bcCarbs" type="text" inputmode="decimal" data-f="bcCarbs" value="${ui.f.bcCarbs ?? ''}" autocomplete="off"></div>
           </div>
           <label class="field" for="f-buyCost">Cost (optional, ${st.currency})</label>
           <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">

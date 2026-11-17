@@ -161,7 +161,7 @@ describe('v2 sheets and helpers', () => {
   test('cookBatchMacros and cookSheet compute macros and g/portion live', () => {
     const s = fresh();
     const m = cookBatchMacros(fixture.items, [4, 6], { 4: 500, 6: 400 });
-    expect(m).toEqual({ kcal: 2450, protein: 148, fat: 0, hasKcal: true, hasProtein: true, hasFat: false });
+    expect(m).toEqual({ kcal: 2450, protein: 148, fat: 0, hasKcal: true, hasProtein: true, hasFat: false, carbs: 0, hasCarbs: false });
 
     openSheet(s, { t: 'cook', id: 9, q: { 4: 500, 6: 400 }, lines: [4, 6] }, {
       cookName: 'Bolognese', cookEmoji: '🍲', cookOwner: 'mine',
