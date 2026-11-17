@@ -63,7 +63,7 @@ Why this split and not more:
 - `render.ts`: if `ui.page.length` render `PAGES[top]({st, ui})` with a header `‹ Back  Title`, else the tab. Tab bar stays visible.
 - A page is just `(v: V) => Html` registered in `PAGES` — same contract as screens and sheets.
 
-## 4. Data model changes (one migration step, `user_version` 2)
+## 4. Data model changes (one migration step, `user_version` 3 (2 was already taken by the fat columns))
 
 ```sql
 ALTER TABLE items        ADD COLUMN carbs_per_unit REAL;
