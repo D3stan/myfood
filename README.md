@@ -15,6 +15,26 @@ To test the remote `/mcp` endpoint locally, generate a secret and set `MCP_SECRE
 openssl rand -hex 32
 ```
 
+## Deploy
+
+Production runs on VM 101 (`myfood@192.168.2.32`), behind a Cloudflare Tunnel.
+
+```sh
+scripts/deploy.sh                 # deploy HEAD
+scripts/deploy.sh myfood@host abc123  # deploy another commit / host
+scripts/deploy.sh --rollback      # back to the previous release
+```
+
+What it does:
+
+1. Builds and tests **the commit** in a scratch folder (`git archive`). Uncommitted changes are never deployed; it warns when the commit isn't pushed.
+2. Uploads it to `/opt/myfood/releases/<commit>/` (unchanged files are hard links to the live release) and runs `npm ci --omit=dev` there, while the old release keeps serving.
+3. Installs the systemd units, `/etc/myfood.env` (printing a diff when it changes) and the helper scripts.
+4. Points `/opt/myfood/current` at the new release in one step and restarts `myfood.service`.
+5. Waits up to 30 s for `/api/health` to report that commit as `build`. If it doesn't, it switches back to the previous release and prints the service log.
+
+The last 5 releases are kept; `/opt/myfood/previous` is what `--rollback` goes to. Check what's live with `curl -s https://<host>/api/health`: `build` is the commit.
+
 ## MCP Server
 
 MyFood exposes an MCP server over both **remote Streamable HTTP** (`/mcp`) and **local stdio** (`npm run mcp`).
