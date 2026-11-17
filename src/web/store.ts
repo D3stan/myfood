@@ -31,6 +31,8 @@ export interface Sheet {
 
 export interface Ui {
   tab: Tab;
+  /** Pushed pages (settings and its subpages); empty = show the tab. */
+  page: string[];
   sheet: Sheet | null;
   /** Text fields by name. Survives re-renders and polls. */
   f: Record<string, string>;
@@ -66,7 +68,7 @@ export interface Store {
 export const newStore = (server: State | null = null, pending: PendingOp[] = []): Store => ({
   server, pending, inflight: new Set(), flushing: false,
   ui: {
-    tab: 'pantry', sheet: null, f: {}, editing: null, toast: null,
+    tab: 'pantry', page: [], sheet: null, f: {}, editing: null, toast: null,
     online: true, loggedOut: false, standalone: true, files: [], seenDone: new Set(),
     ownerFilter: 'all', historyScope: 'me', jobMode: 'auto',
     barcodeLookup: null, barcodeBusy: false, scannerActive: false, scannerSupported: false,

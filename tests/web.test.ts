@@ -13,7 +13,7 @@ import { itemToFields, macroBasis } from '../src/web/ui/components/sheets.ts';
 import { appHtml, sheetHtml, toastHtml } from '../src/web/ui/render.ts';
 import { groupByDay } from '../src/web/ui/screens/history.ts';
 import { heroPreset } from '../src/web/ui/screens/pantry.ts';
-import { shortcutText } from '../src/web/ui/screens/shortcuts.ts';
+import { shortcutText } from '../src/web/ui/settings/shortcuts.ts';
 import { fixture } from './fixture.ts';
 
 const fresh = () => newStore(structuredClone(fixture));
@@ -524,20 +524,37 @@ describe('render smoke', () => {
 });
 
 describe('siri shortcuts and guest card', () => {
-  test('Me tab offers both shortcuts with copyable setup text, and the guest passcode', () => {
+  test('Siri page offers both shortcuts with copyable setup text; household page has the guest passcode', () => {
     const s = fresh();
-    s.ui.tab = 'me';
+    s.ui.page = ['siri'];
     const out = appHtml(s);
     expect(out).toContain('MyFood AI');
     expect(out).toContain('Log meal');
     expect(out).toContain('data-a="copyShortcut" data-k="ai"');
     expect(out).toContain('data-a="copyShortcut" data-k="log"');
-    expect(out).toContain('abcd-2345');
-    expect(out).toContain('data-a="newGuestCode"');
+    expect(out).toContain('data-a="createToken"');
     // no token yet: the text says where to paste it
     expect(out).toContain('&lt;PASTE YOUR TOKEN HERE&gt;');
     s.ui.newToken = 'mf_secret123';
     expect(appHtml(s)).toContain('Bearer mf_secret123');
+    s.ui.page = ['household'];
+    const hh = appHtml(s);
+    expect(hh).toContain('abcd-2345');
+    expect(hh).toContain('data-a="newGuestCode"');
+    expect(hh).toContain('data-a="saveSettings"');
+  });
+  test('Me shows the settings gear; settings pages render their controls with a Back button', () => {
+    const s = fresh();
+    s.ui.tab = 'me';
+    expect(appHtml(s)).toContain('data-a="go" data-p="settings"');
+    s.ui.page = ['settings'];
+    const root = appHtml(s);
+    for (const p of ['profile', 'household', 'presets', 'siri']) expect(root).toContain(`data-p="${p}"`);
+    expect(root).toContain('data-a="logout"');
+    expect(root).toContain('data-a="back"');
+    expect(root).toContain('data-a="tab"'); // tab bar stays
+    const key: Record<string, string> = { profile: 'data-a="saveMe"', presets: 'data-s="presetEdit"' };
+    for (const [p, needle] of Object.entries(key)) { s.ui.page = ['settings', p]; expect(appHtml(s)).toContain(needle); }
   });
   test('shortcutText names the endpoints and the mode of each shortcut', () => {
     const ai = shortcutText('ai', 'https://x.test', 'tok');
