@@ -1,39 +1,26 @@
 // What the buttons do. Reads and writes the store, talks to the API, then renders.
-import {
-  ApiError, addExpense, api, cookMeal, createToken, exportExpensesUrl,
-  linkBarcode, lockExpenses, lookupBarcode, onUnauthorized, revokeToken,
-  saveSettings, startJob, subscribePush, testPush, unsubscribePush,
-} from '../api.ts';
-import { clear, flush, save } from '../outbox.ts';
-import { closeSheet, enqueueEvent, enqueueUndo, openSheet, qOf, receive, setQ, stepQ, store as s, view } from '../store.ts';
+// Feature action maps live beside their screens and are merged at the bottom.
+import { api, cookMeal, linkBarcode, lookupBarcode, startJob } from '../api.ts';
+import { flush } from '../outbox.ts';
+import { closeSheet, enqueueEvent, enqueueUndo, openSheet, qOf, receive, setQ, stepQ, store as s } from '../store.ts';
 import type { Sheet, Tab } from '../store.ts';
-import { ISO_DATE_RE, addDays, isoDate, parseIsoDate } from '../../shared/dates.ts';
+import { ISO_DATE_RE, addDays, isoDate } from '../../shared/dates.ts';
 import { isLow, levelParts, shown } from '../../shared/stock.ts';
-import { fmtNum, nameKey, parseCostCents, parseNum } from '../../shared/text.ts';
+import { fmtNum, nameKey, parseNum } from '../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../shared/types.ts';
 import type { Category, Item, Kind, LineIn, PendingOp, State, Unit } from '../../shared/types.ts';
 import { barcodeToFields, bcModeOf, bcTotal, decodeBarcodePhoto, isBarcodeDetectorSupported, startBarcodeScanner, stopScanner } from './components/barcode.ts';
 import { amount, hourToTime, levelReadLabel, timeToHour, unitOf } from './components/bits.ts';
 import { cookBatchMacros } from './components/cook.ts';
 import { itemToFields, macroBasis } from './components/sheets.ts';
-import { render } from './render.ts';
+import { afterState, commit, fail, hooks, mutate, parseOptCostCents, sheet, st, sync, toast } from './helpers.ts';
 import { shoppingText } from './screens/pantry.ts';
-import { shortcutText } from './screens/shortcuts.ts';
+import { settingsActions } from './settings/actions.ts';
+import { spendActions } from './spend/actions.ts';
 
-export const hooks: { state?: () => void } = {};
+export { afterState, commit, hooks, sync, toast };
 
-export const commit = (): void => render(s);
-export const sync = (): void => { save(s); commit(); };
-
-let toastId = 0, toastTimer = 0;
-export function toast(msg: string, cids?: string[]): void {
-  const id = ++toastId;
-  s.ui.toast = { id, msg, cids };
-  clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { if (s.ui.toast?.id === id) { s.ui.toast = null; commit(); } }, 5000);
-}
-const fail = (e: unknown): void => toast(e instanceof ApiError ? e.message : 'Something went wrong');
-
+const item = (id: unknown) => st().items.find(i => i.id === Number(id));
 const sendOp = (op: PendingOp) => (op.type === 'event' ? api('POST', '/api/events', op.body) : api('DELETE', `/api/events/${op.cid}`));
 
 export async function pump(): Promise<void> {
@@ -42,34 +29,13 @@ export async function pump(): Promise<void> {
   afterState();
 }
 
-/** A job that finished on its own: show what it said (with Undo for what it did), then dismiss it. */
-function sweepJobs(): void {
-  for (const j of s.server?.jobs ?? []) {
-    if (j.status !== 'done' || s.ui.seenDone.has(j.id)) continue;
-    s.ui.seenDone.add(j.id);
-    toast(j.result?.reply || 'Done.', j.event_cids.length ? j.event_cids : undefined);
-    api('DELETE', `/api/jobs/${j.id}`).then(st => { receive(s, st); afterState(); }).catch(() => {});
-  }
-}
-export function afterState(): void { sweepJobs(); hooks.state?.(); sync(); }
 
 export async function refresh(): Promise<void> {
   if (s.flushing) return;
   try { receive(s, await api('GET', '/api/state')); afterState(); } catch { /* offline: keep what we have */ }
 }
 
-async function mutate(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<boolean> {
-  if (!navigator.onLine) { toast("You're offline"); return false; }
-  try { receive(s, await api(method, path, body)); afterState(); return true; } catch (e) { fail(e); return false; }
-}
 
-const signedOut = (): void => {
-  stopScanner(s);
-  s.server = null; s.pending = []; s.ui.loggedOut = true; s.ui.sheet = null; s.ui.tab = 'pantry';
-  s.ui.newToken = null; s.ui.barcodeLookup = null;
-  clear(); commit();
-};
-onUnauthorized(signedOut);
 
 /** Logs an event: shown at once, sent in the background, Undo in the toast. */
 function logged(kind: Kind, lines: LineIn[], msg: string, extra: { preset_id?: number; note?: string; cost_cents?: number } = {}): void {
@@ -79,9 +45,6 @@ function logged(kind: Kind, lines: LineIn[], msg: string, extra: { preset_id?: n
   void pump();
 }
 
-const st = () => view(s)!;
-const item = (id: unknown) => st().items.find(i => i.id === Number(id));
-const sheet = () => s.ui.sheet!;
 const amountText = (unit: Unit, q: number): string =>
   unit === 'level' ? `${fmtNum(q)} ${q === 1 ? 'container' : 'containers'}` : `${fmtNum(q)} ${unit}`;
 const ate = (it: { name: string; emoji: string; unit: string }, q: number) => it.unit === 'level'
@@ -109,25 +72,10 @@ const parseOptNum = (raw: string | undefined): number | null | 'invalid' => {
   return Number.isNaN(n) ? 'invalid' : n;
 };
 
-const parseOptCostCents = (raw: string | undefined): number | null | 'invalid' => {
-  const t = (raw ?? '').trim();
-  if (!t) return null;
-  const c = parseCostCents(t);
-  return Number.isNaN(c) ? 'invalid' : c;
-};
-
 const resolveItemQty = (sh: Sheet, it: Item, q: number): number =>
   sh.portionMode && it.is_cooked && it.portion_g != null
     ? Math.round(q * it.portion_g * 1000) / 1000
     : q;
-
-function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
-  const pad = '='.repeat((4 - (base64.length % 4)) % 4);
-  const raw = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
-  const out = new Uint8Array(new ArrayBuffer(raw.length));
-  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
-  return out;
-}
 
 function cookStateFor(it: Item | undefined, nowMs: number): {
   lines: number[];
@@ -210,9 +158,11 @@ function confirmOverdraw(v: State, lines: { item_id: number; qty: number }[]): b
   return msg == null || (globalThis.confirm?.(msg) ?? true);
 }
 
-export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
+const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   rerender: () => {},
-  tab: el => { stopScanner(s); s.ui.tab = el.dataset.tab as Tab; window.scrollTo(0, 0); },
+  go: el => { s.ui.page.push(el.dataset.p!); history.pushState(null, ''); window.scrollTo(0, 0); },
+  back: () => history.back(),
+  tab: el => { stopScanner(s); s.ui.tab = el.dataset.tab as Tab; s.ui.page = []; window.scrollTo(0, 0); },
   close: () => { stopScanner(s); closeSheet(s); },
   share: async () => {
     const text = shoppingText(visibleLowItems(st()));
@@ -425,10 +375,6 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     const body = { name, emoji: (f.emoji ?? '').trim() || '🍽️', hour: timeToHour(f.time || '08:00'), lines };
     if (await mutate(sh.id == null ? 'POST' : 'PATCH', sh.id == null ? '/api/presets' : `/api/presets/${sh.id}`, body)) { closeSheet(s); toast(`Saved ${name}`); }
   },
-  delPreset: async el => {
-    const p = st().presets.find(x => x.id === Number(el.dataset.id));
-    if (p && confirm(`Delete ${p.name}?`) && await mutate('DELETE', `/api/presets/${p.id}`)) toast(`Deleted ${p.name}`);
-  },
   rmLine: el => {
     const sh = sheet(), k = el.dataset.k!;
     if (sh.t === 'presetEdit' || sh.t === 'cook') { sh.lines = sh.lines?.filter(id => String(id) !== k); return; }
@@ -613,47 +559,6 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
       { name: e.note ?? '', emoji: '🍽️', time: hourToTime(d.getHours() + d.getMinutes() / 60) });
   },
 
-  // spend & expenses
-  saveExpense: async () => {
-    const sh = sheet(), f = s.ui.f;
-    if (sh.busy) return;
-    if (!navigator.onLine) return void toast("You're offline");
-    const cost_cents = parseOptCostCents(f.expCost);
-    if (cost_cents === 'invalid' || !(cost_cents && cost_cents > 0)) return void toast('Enter an amount');
-    const dateStr = (f.expDate ?? '').trim();
-    const parsedDate = dateStr ? parseIsoDate(dateStr) : null;
-    if (dateStr && !parsedDate) return void toast('Check the date');
-    const at = parsedDate
-      ? (dateStr === isoDate(st().now) ? Date.now() : parsedDate.getTime() + 12 * 3_600_000)
-      : Date.now();
-    const note = (f.expNote ?? '').trim() || null;
-    sh.busy = true; commit();
-    try {
-      receive(s, await addExpense({ cid: crypto.randomUUID(), at, cost_cents, note }));
-      closeSheet(s);
-      toast('Expense logged');
-      afterState();
-    } catch (e) { fail(e); } finally { sh.busy = false; }
-  },
-  lockWeek: async el => {
-    const period = el.dataset.p;
-    if (!period || !navigator.onLine) return void (period ? toast("You're offline") : null);
-    if (!confirm(`Lock expenses for ${period}? Locked weeks cannot be edited.`)) return;
-    try { receive(s, await lockExpenses({ period })); toast(`Locked ${period}`); afterState(); } catch (e) { fail(e); }
-  },
-  exportExpenses: el => {
-    const period = el.dataset.p ?? '';
-    const format = el.dataset.fmt === 'json' ? 'json' : 'csv';
-    const url = exportExpensesUrl(period, format);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `expenses-${period || 'all'}.${format}`;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  },
-
   // composer and review
   jobMode: el => {
     const mode = el.dataset.v === 'audit' ? 'audit' : 'auto';
@@ -718,134 +623,11 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
   },
   discard: () => mutate('DELETE', `/api/jobs/${sheet().id}`),
 
-  // me, settings, push, tokens, login
-  saveMe: async () => {
-    const f = s.ui.f, me = st().me;
-    const body = {
-      name: (f.meName ?? me.name).trim() || me.name,
-      emoji: (f.meEmoji ?? me.emoji).trim() || me.emoji,
-      notify_low: f.notifyLow !== undefined ? f.notifyLow === '1' : me.notify_low,
-      notify_expiry: f.notifyExpiry !== undefined ? f.notifyExpiry === '1' : me.notify_expiry,
-    };
-    if (await mutate('PATCH', '/api/me', body)) {
-      delete f.meName; delete f.meEmoji; toast('Saved');
-    }
-  },
-  saveNotify: async () => {
-    const f = s.ui.f, me = st().me;
-    await mutate('PATCH', '/api/me', {
-      notify_low: f.notifyLow !== undefined ? f.notifyLow === '1' : me.notify_low,
-      notify_expiry: f.notifyExpiry !== undefined ? f.notifyExpiry === '1' : me.notify_expiry,
-    });
-  },
-  saveSettings: async () => {
-    const currency = (s.ui.f.currency ?? st().currency).trim();
-    if (!currency) return void toast('Enter a currency');
-    if (!navigator.onLine) return void toast("You're offline");
-    try {
-      receive(s, await saveSettings({ currency }));
-      delete s.ui.f.currency;
-      toast('Saved currency');
-      afterState();
-    } catch (e) { fail(e); }
-  },
-  enablePush: async () => {
-    if (typeof Notification === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-      return void toast('Push notifications are not supported here');
-    }
-    // Call Notification.requestPermission() synchronously inside the tap gesture (required for iOS Safari 16.4+)
-    const permPromise = Notification.requestPermission();
-    const perm = await permPromise;
-    s.ui.pushPermission = perm;
-    if (perm !== 'granted') return void toast('Notification permission was not granted');
-    const vapid = st().vapid_public_key;
-    if (!vapid) return void toast('Push is not configured on the server');
-    if (!navigator.onLine) return void toast("You're offline");
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid),
-      });
-      const json = sub.toJSON();
-      if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
-        return void toast('Could not read push subscription');
-      }
-      receive(s, await subscribePush({
-        endpoint: json.endpoint,
-        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
-      }));
-      toast('Push notifications enabled');
-      afterState();
-    } catch (e) { fail(e); }
-  },
-  disablePush: async () => {
-    if (!navigator.onLine) return void toast("You're offline");
-    try {
-      const reg = await navigator.serviceWorker?.ready;
-      const sub = await reg?.pushManager?.getSubscription();
-      if (sub) {
-        receive(s, await unsubscribePush({ endpoint: sub.endpoint }));
-        await sub.unsubscribe().catch(() => {});
-      }
-      toast('Push notifications disabled');
-      afterState();
-    } catch (e) { fail(e); }
-  },
-  testPush: async () => {
-    if (!navigator.onLine) return void toast("You're offline");
-    try {
-      const res = await testPush();
-      toast(res.sent > 0 ? 'Test notification sent' : 'No active push subscription');
-    } catch (e) { fail(e); }
-  },
-  createToken: async () => {
-    const name = (s.ui.f.tokenName ?? '').trim();
-    if (!name) return void toast('Give the token a name');
-    if (!navigator.onLine) return void toast("You're offline");
-    try {
-      const res = await createToken({ name });
-      s.ui.newToken = res.token;
-      s.ui.f.tokenName = '';
-      receive(s, res.state);
-      toast('Token created — copy it now');
-      afterState();
-    } catch (e) { fail(e); }
-  },
-  copyToken: async () => {
-    if (!s.ui.newToken) return;
-    try { await navigator.clipboard.writeText(s.ui.newToken); toast('Token copied'); }
-    catch { toast('Copy failed — select and copy manually'); }
-  },
-  revokeToken: async el => {
-    const id = Number(el.dataset.id);
-    if (!id || !confirm('Revoke this Siri Shortcut token?')) return;
-    if (!navigator.onLine) return void toast("You're offline");
-    try {
-      receive(s, await revokeToken(id));
-      toast('Token revoked');
-      afterState();
-    } catch (e) { fail(e); }
-  },
-  copyShortcut: async el => {
-    const kind = el.dataset.k === 'log' ? 'log' : 'ai';
-    try {
-      await navigator.clipboard.writeText(shortcutText(kind, location.origin, s.ui.newToken));
-      toast(s.ui.newToken ? 'Setup text copied (with your token)' : 'Setup text copied — add your token where it says');
-    } catch { toast('Copy failed — open "Show the steps" and copy manually'); }
-  },
-  newGuestCode: async () => {
-    if (confirm('Make a new guest passcode? Current guests will be locked out.')) await mutate('POST', '/api/guest/code');
-  },
-  copyGuest: async () => {
-    const code = st().guest_code;
-    try { await navigator.clipboard.writeText(`${location.origin}/guest  passcode: ${code}`); toast('Guest link and passcode copied'); }
-    catch { toast('Copy failed — select and copy manually'); }
-  },
-  logout: async () => { await api('POST', '/api/logout').catch(() => {}); signedOut(); },
   login: async () => {
     const code = (s.ui.f.code ?? '').trim().toLowerCase();
     if (!code) return;
     try { receive(s, await api('POST', '/api/login', { code })); s.ui.f.code = ''; afterState(); } catch (e) { fail(e); }
   },
 };
+
+export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = { ...core, ...settingsActions, ...spendActions };

@@ -3,6 +3,7 @@ import { html, htmlToString } from '../html.ts';
 import type { Html } from '../html.ts';
 import { view } from '../store.ts';
 import type { Store } from '../store.ts';
+import type { V } from './components/bits.ts';
 import { barcodeSheet } from './components/barcode.ts';
 import { composeSheet, reviewSheet } from './components/compose.ts';
 import { cookSheet } from './components/cook.ts';
@@ -12,14 +13,21 @@ import { history } from './screens/history.ts';
 import { login } from './screens/login.ts';
 import { me } from './screens/me.ts';
 import { pantry } from './screens/pantry.ts';
-import { spend } from './screens/spend.ts';
+import { PAGES } from './settings/index.ts';
+import { spend } from './spend/screen.ts';
+
+const page = (v: V, key: string): Html => {
+  const p = PAGES[key];
+  return html`<div class="row" style="align-items:center;gap:8px"><button class="linkbtn" data-a="back">‹ Back</button><h1 class="grow" style="margin:0">${p?.title ?? ''}</h1></div>${p?.render(v)}`;
+};
 
 // Pure: state in, HTML string out (so tests need no DOM).
 export function appHtml(s: Store, now = new Date()): string {
   const st = view(s);
   const out: Html = !st
     ? (s.ui.loggedOut ? login(s.ui) : html`<p class="center muted" style="margin-top:30vh">Loading…</p>`)
-    : html`${s.ui.tab === 'pantry' ? pantry({ st, ui: s.ui }, now)
+    : html`${s.ui.page.length ? page({ st, ui: s.ui }, s.ui.page[s.ui.page.length - 1]!)
+        : s.ui.tab === 'pantry' ? pantry({ st, ui: s.ui }, now)
         : s.ui.tab === 'spend' ? spend({ st, ui: s.ui }, now)
         : s.ui.tab === 'history' ? history({ st, ui: s.ui })
         : me({ st, ui: s.ui })}${composer()}${tabbar(s.ui.tab)}`;

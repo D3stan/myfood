@@ -72,6 +72,7 @@ void pump();
 
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { void refresh(); void pump(); void syncPushState(); } });
 addEventListener('focus', () => { void pump(); void syncPushState(); });
+addEventListener('popstate', () => { s.ui.page.pop(); commit(); });
 addEventListener('online', () => { s.ui.online = true; commit(); void pump(); void refresh(); });
 addEventListener('offline', () => { s.ui.online = false; commit(); });
 
