@@ -16,11 +16,9 @@ import {
   CookBody,
   EventBody,
   EventPatch,
-  ExpenseBody,
   ItemBody,
   ItemPatch,
   JobMode,
-  LockPeriodBody,
   LoginBody,
   MeBody,
   PresetBody,
@@ -44,6 +42,7 @@ import type { JobFile, RunAi } from './jobs.ts';
 import { ensureVapidKeys, notifyLowCrossings, sendTestPush, subscribePush, unsubscribePush } from './push.ts';
 import type { PushSender } from './push.ts';
 import { createMyFoodMcpServer } from './mcp.ts';
+import { registerSpendRoutes } from './spend/routes.ts';
 
 export interface Deps {
   db: Db;
@@ -254,25 +253,7 @@ export function createApp(deps: Deps): Hono<Env> {
     return c.json(state(c.get('uid')));
   });
 
-  // ---- expenses ----
-  app.post('/api/expenses', async c => {
-    d.addExpense(db, c.get('uid'), parse(ExpenseBody, await json(c)), now());
-    return c.json(state(c.get('uid')));
-  });
-  app.post('/api/expenses/lock', async c => {
-    d.lockExpensePeriod(db, c.get('uid'), parse(LockPeriodBody, await json(c)), now());
-    return c.json(state(c.get('uid')));
-  });
-  app.get('/api/expenses/export', c => {
-    const period = c.req.query('period') || undefined;
-    const formatRaw = (c.req.query('format') || 'csv').toLowerCase();
-    if (formatRaw !== 'csv' && formatRaw !== 'json') d.fail(400, 'Format must be csv or json');
-    const out = d.exportExpenses(db, { period, format: formatRaw });
-    return c.body(out.body, 200, {
-      'Content-Type': out.contentType,
-      'Content-Disposition': `attachment; filename="${out.filename}"`,
-    });
-  });
+  registerSpendRoutes(app, { db, now, state, json, parse });
 
   // ---- presets ----
   app.post('/api/presets', async c => {

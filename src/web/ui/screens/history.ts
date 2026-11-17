@@ -1,6 +1,6 @@
 import { html } from '../../html.ts';
 import { isoDate } from '../../../shared/dates.ts';
-import { computeDailyNutrition } from '../../../shared/stock.ts';
+import { computeDailyNutrition } from '../../../shared/nutrition.ts';
 import { fmtCost, fmtNum } from '../../../shared/text.ts';
 import type { FoodEvent } from '../../../shared/types.ts';
 import { VERB, clock, lineText, userOf } from '../components/bits.ts';
