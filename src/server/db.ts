@@ -15,8 +15,10 @@ export const get = <T>(db: Db, sql: string, ...p: SQLInputValue[]): T | undefine
 export const all = <T>(db: Db, sql: string, ...p: SQLInputValue[]): T[] => db.prepare(sql).all(...p) as T[];
 export const run = (db: Db, sql: string, ...p: SQLInputValue[]) => db.prepare(sql).run(...p);
 
-/** All-or-nothing. Callbacks are synchronous, so nothing else touches the connection meanwhile. Do not nest. */
+/** All-or-nothing. Callbacks are synchronous, so nothing else touches the connection meanwhile.
+ *  Nested calls join the outer transaction, so an inner throw rolls back everything. */
 export function transaction<T>(db: Db, fn: () => T): T {
+  if (db.isTransaction) return fn();
   db.exec('BEGIN IMMEDIATE');
   try {
     const out = fn();

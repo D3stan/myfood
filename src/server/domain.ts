@@ -588,7 +588,6 @@ export interface CookBatchOptions {
   now?: number;
   source?: Source;
   jobId?: number | null;
-  inTx?: boolean;
   expires_in_days?: number | null;
 }
 
@@ -834,7 +833,7 @@ export function applyCookBatch(
     return { mealItemId, eventCids, prevStocks };
   };
 
-  return opts?.inTx ? exec() : transaction(db, exec);
+  return transaction(db, exec);
 }
 
 // ---- expenses ----

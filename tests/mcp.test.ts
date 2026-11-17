@@ -843,7 +843,7 @@ test('stdio MCP transport connects against MYFOOD_DB and runs tools end-to-end',
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    expect(tools.tools.length).toBe(25);
+    expect(tools.tools.length).toBe(27);
     expect(tools.tools.map(t => t.name)).toContain('get_state');
     expect(tools.tools.map(t => t.name)).toContain('query_sql');
 
@@ -869,3 +869,106 @@ test('stdio MCP transport connects against MYFOOD_DB and runs tools end-to-end',
 function roundTo4(n: number): number {
   return Math.round(n * 10_000) / 10_000;
 }
+
+test('batch_items creates/updates/archives atomically; update_preset merges fields', async () => {
+  const { client, transport } = await connectClient(app);
+  try {
+    const first = parseJsonResult(
+      await client.callTool({
+        name: 'batch_items',
+        arguments: {
+          create: [
+            { name: 'Oats', category: 'pantry', unit: 'g' },
+            { name: 'Milk', category: 'dairy', unit: 'ml', low_at: 500 },
+          ],
+        },
+      }),
+    );
+    const [oats, milk] = first.created as { id: number; name: string; step: number }[];
+    expect(oats!.step).toBe(50);
+
+    // A failing op (unknown id) rolls back the whole batch, including the create before it.
+    const bad = await client.callTool({
+      name: 'batch_items',
+      arguments: { create: [{ name: 'Rice', category: 'pantry', unit: 'g' }], update: [{ item_id: 9999, name: 'X' }] },
+    });
+    expect(bad.isError).toBe(true);
+    expect((bad.content as { text: string }[])[0]!.text).toContain('update[0] (#9999)');
+    expect(db.prepare("SELECT COUNT(*) AS n FROM items WHERE name = 'Rice'").get()).toEqual({ n: 0 });
+
+    const mixed = parseJsonResult(
+      await client.callTool({
+        name: 'batch_items',
+        arguments: { update: [{ item_id: oats!.id, kcal_per_unit: 3.8 }], archive: [milk!.id] },
+      }),
+    );
+    expect((mixed.updated as { kcal_per_unit: number }[])[0]!.kcal_per_unit).toBe(3.8);
+    expect(mixed.archived_item_ids).toEqual([milk!.id]);
+
+    const created = parseJsonResult(
+      await client.callTool({
+        name: 'create_preset',
+        arguments: { name: 'Porridge', lines: [{ item_id: oats!.id, qty: 80 }] },
+      }),
+    );
+    const presetId = (created.preset as { id: number }).id;
+    const upd = parseJsonResult(
+      await client.callTool({ name: 'update_preset', arguments: { preset_id: presetId, hour: 7.5 } }),
+    );
+    expect(upd.preset).toMatchObject({ name: 'Porridge', hour: 7.5, lines: [{ item_id: oats!.id, qty: 80 }] });
+  } finally {
+    await transport.close();
+    await client.close();
+  }
+});
+
+test('lines accept item names; get_state is compact by default; empty preset gives a clear error', async () => {
+  const { client, transport } = await connectClient(app);
+  try {
+    db.prepare('INSERT INTO users(name, emoji, code_hash, created_at) VALUES (?, ?, ?, 0)').run('Bob', '🐻', sha256('bbbb-bbbb-bbbb'));
+    const { created } = parseJsonResult(
+      await client.callTool({
+        name: 'batch_items',
+        arguments: {
+          create: [
+            { name: 'Eggs', category: 'dairy', unit: 'pc' },
+            { name: 'Yogurt', category: 'dairy', unit: 'g', owner_id: 1 },
+            { name: 'Yogurt', category: 'dairy', unit: 'g', owner_id: 2 },
+          ],
+        },
+      }),
+    ) as { created: { id: number }[] };
+    const [eggs, aliceYogurt] = created;
+
+    // Bob's personal Yogurt doesn't make Alice's lookup ambiguous.
+    const logged = parseJsonResult(
+      await client.callTool({
+        name: 'log_event',
+        arguments: { user_id: 1, kind: 'buy', lines: [{ item: 'eggs', qty: 6 }, { item: 'Yogurt', qty: 500 }] },
+      }),
+    );
+    expect((logged.event as { lines: { item_id: number }[] }).lines.map(l => l.item_id)).toEqual([eggs!.id, aliceYogurt!.id]);
+
+    const missing = await client.callTool({
+      name: 'log_event',
+      arguments: { user_id: 1, kind: 'eat', lines: [{ item_id: eggs!.id, qty: 1 }, { item: 'Caviar', qty: 1 }] },
+    });
+    expect(missing.isError).toBe(true);
+    expect((missing.content as { text: string }[])[0]!.text).toBe('lines[1]: No active item called "Caviar"');
+
+    const state = parseJsonResult(await client.callTool({ name: 'get_state', arguments: { user_id: 1 } }));
+    expect(state.events).toBeUndefined();
+    const full = parseJsonResult(await client.callTool({ name: 'get_state', arguments: { user_id: 1, full: true } }));
+    expect(Array.isArray(full.events)).toBe(true);
+
+    const preset = parseJsonResult(
+      await client.callTool({ name: 'create_preset', arguments: { user_id: 1, name: 'Eggs', lines: [{ item: 'Eggs', qty: 2 }] } }),
+    ).preset as { id: number };
+    await client.callTool({ name: 'archive_item', arguments: { item_id: eggs!.id } });
+    const empty = await client.callTool({ name: 'update_preset', arguments: { user_id: 1, preset_id: preset.id, hour: 8 } });
+    expect((empty.content as { text: string }[])[0]!.text).toBe('Preset has no items left; pass lines');
+  } finally {
+    await transport.close();
+    await client.close();
+  }
+});

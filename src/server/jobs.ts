@@ -307,7 +307,6 @@ function applyProposalToDb(
         now: at,
         source: 'cook',
         jobId: opts.jobId,
-        inTx: true,
         expires_in_days: c.expires_in_days,
       });
       eventCids.push(...res.eventCids);

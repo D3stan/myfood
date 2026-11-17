@@ -18,6 +18,7 @@ import {
   ItemBody,
   ItemPatch,
   Kind,
+  LineIn,
   LockPeriodBody,
   MeBody,
   PresetBody,
@@ -150,11 +151,19 @@ function errorResult(message: string) {
   };
 }
 
+// Zod's own .message is a JSON dump of issues; flatten it like routes.ts parse() does.
+function errMessage(err: unknown): string {
+  if (err instanceof z.ZodError) {
+    return err.issues.map(i => (i.path.length ? `${i.path.join('.')}: ` : '') + i.message).join('; ');
+  }
+  return (err instanceof Error ? err.message : String(err)).replace(/\.$/, '');
+}
+
 async function runTool(fn: () => ReturnType<typeof okResult> | Promise<ReturnType<typeof okResult>>) {
   try {
     return await fn();
   } catch (err) {
-    return errorResult(err instanceof Error ? err.message : String(err));
+    return errorResult(errMessage(err));
   }
 }
 
@@ -300,14 +309,7 @@ function hydrateEventLines(db: Db, cid: string) {
   }));
 }
 
-function hydrateEventByCid(db: Db, cid: string): (FoodEvent & { seq: number }) | null {
-  const ev = get<EventRowFull>(
-    db,
-    `SELECT cid, seq, user_id, at, kind, source, note, preset_id, cost_cents, counts_nutrition, undone_at
-     FROM events WHERE cid = ?`,
-    cid,
-  );
-  if (!ev) return null;
+function eventRowToJson(db: Db, ev: EventRowFull, withUndone = false) {
   return {
     cid: ev.cid,
     seq: ev.seq,
@@ -319,9 +321,71 @@ function hydrateEventByCid(db: Db, cid: string): (FoodEvent & { seq: number }) |
     preset_id: ev.preset_id,
     cost_cents: ev.cost_cents,
     counts_nutrition: !!ev.counts_nutrition,
+    ...(withUndone ? { undone_at: ev.undone_at } : {}),
     lines: hydrateEventLines(db, ev.cid),
   };
 }
+
+function hydrateEventByCid(db: Db, cid: string): (FoodEvent & { seq: number }) | null {
+  const ev = get<EventRowFull>(
+    db,
+    `SELECT cid, seq, user_id, at, kind, source, note, preset_id, cost_cents, counts_nutrition, undone_at
+     FROM events WHERE cid = ?`,
+    cid,
+  );
+  return ev ? eventRowToJson(db, ev) : null;
+}
+
+type ItemRef = { item_id?: number; item?: string };
+
+/**
+ * Turns {item_id} or {item: name} into an active item id. Name matches the acting user's
+ * personal items plus shared ones, then falls back to a learned receipt alias.
+ */
+function resolveItemRef(db: Db, ref: ItemRef, userId: number | null): number {
+  if (ref.item_id !== undefined) {
+    if (ref.item !== undefined) d.fail(400, 'Pass item_id or item, not both');
+    return ref.item_id;
+  }
+  if (!ref.item) d.fail(400, 'Each line needs item_id or item (name)');
+  const matches = all<{ id: number; owner_id: number | null }>(
+    db,
+    'SELECT id, owner_id FROM items WHERE name_key = ? AND archived_at IS NULL AND (owner_id IS NULL OR owner_id = ?)',
+    nameKey(ref.item),
+    userId ?? 0,
+  );
+  if (matches.length === 1) return matches[0]!.id;
+  if (matches.length > 1) {
+    d.fail(400, `"${ref.item}" matches several items (${matches.map(m => `id=${m.id} owner_id=${m.owner_id}`).join('; ')}); pass item_id`);
+  }
+  const alias = get<{ item_id: number }>(
+    db,
+    'SELECT a.item_id FROM aliases a JOIN items i ON i.id = a.item_id WHERE a.text = ? AND i.archived_at IS NULL',
+    aliasKey(ref.item),
+  );
+  if (alias) return alias.item_id;
+  d.fail(404, `No active item called "${ref.item}"`);
+}
+
+/** Resolves every line before any write; errors name the line index. */
+function resolveLines<T extends ItemRef>(db: Db, field: string, lines: T[], userId: number | null) {
+  return lines.map((l, i) => {
+    try {
+      const { item: _name, ...rest } = l;
+      return { ...rest, item_id: resolveItemRef(db, l, userId) };
+    } catch (err) {
+      d.fail(400, `${field}[${i}]: ${errMessage(err)}`);
+    }
+  });
+}
+
+// MCP-facing line schemas: item_id or item (name), refined in the handler.
+const itemRefShape = {
+  item_id: z.number().int().positive().optional().describe('Item ID (or pass item instead)'),
+  item: z.string().trim().min(1).max(60).optional().describe('Item name, used when item_id is omitted'),
+};
+const McpLineIn = LineIn.extend(itemRefShape);
+const McpCookIngredientIn = CookIngredientIn.extend(itemRefShape);
 
 // ---- Read-only SQL guard ----
 
@@ -537,11 +601,13 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       description: 'Read the household state: users, active items with current stock, presets, daily nutrition, expenses, expense locks, and currency.',
       inputSchema: {
         user_id: z.number().int().positive().optional().describe('Optional user ID perspective for me, presets, and usual map. Defaults to first user.'),
-        compact: z.boolean().optional().describe('When true, omits events log and usual map and trims recent expenses/nutrition.'),
+        full: z.boolean().optional().describe('When true, also returns the events log and usual map and all expenses/nutrition (large). Default is compact.'),
+        compact: z.boolean().optional().describe('Deprecated: compact is now the default; compact=false is the same as full=true.'),
       },
       annotations: READ_ANNOTATIONS,
     },
-    ({ user_id, compact }) => runTool(() => {
+    ({ user_id, full, compact: compactArg }) => runTool(() => {
+      const compact = !full && compactArg !== false;
       const nowMs = now();
       const uid = resolveReadUserId(db, user_id, opts?.defaultUserId);
       const currency = getMeta(db, 'currency') ?? 'kr';
@@ -591,7 +657,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
 
       const lowCount = items.filter(i => i.is_low).length;
       return okResult(
-        `State rev ${st.rev}: ${items.length} active items (${lowCount} low), ${st.users.length} users, ${st.presets.length} presets, currency ${st.currency}.`,
+        `State rev ${st.rev}: ${items.length} active items (${lowCount} low), ${st.users.length} users, ${st.presets.length} presets, currency ${st.currency}.${compact ? ' Compact view: events and usual omitted (pass full=true, or use list_events).' : ''}`,
         data,
       );
     }),
@@ -683,19 +749,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
          ORDER BY e.at DESC, e.seq DESC LIMIT 20`,
         item.id,
       );
-      const recent_events = eventRows.map(ev => ({
-        cid: ev.cid,
-        seq: ev.seq,
-        user_id: ev.user_id,
-        at: ev.at,
-        kind: ev.kind,
-        source: ev.source,
-        note: ev.note,
-        preset_id: ev.preset_id,
-        cost_cents: ev.cost_cents,
-        counts_nutrition: !!ev.counts_nutrition,
-        lines: hydrateEventLines(db, ev.cid),
-      }));
+      const recent_events = eventRows.map(ev => eventRowToJson(db, ev));
 
       return okResult(`${item.emoji} ${item.name} (#${item.id}): stock ${item.stock} ${item.unit}.`, {
         item,
@@ -758,20 +812,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         ...params,
         cap,
       );
-      const events = rows.map(ev => ({
-        cid: ev.cid,
-        seq: ev.seq,
-        user_id: ev.user_id,
-        at: ev.at,
-        kind: ev.kind,
-        source: ev.source,
-        note: ev.note,
-        preset_id: ev.preset_id,
-        cost_cents: ev.cost_cents,
-        counts_nutrition: !!ev.counts_nutrition,
-        ...(include_undone ? { undone_at: ev.undone_at } : {}),
-        lines: hydrateEventLines(db, ev.cid),
-      }));
+      const events = rows.map(ev => eventRowToJson(db, ev, !!include_undone));
       const last = rows.at(-1);
       const next = rows.length === cap && last ? { before_at: last.at, before_seq: last.seq } : null;
       if (format === 'csv') {
@@ -975,49 +1016,117 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
 
   // ---- Write / Mutate tools ----
 
+  const createItemShape = {
+    name: ItemBody.shape.name.describe('Item name (unique per owner scope)'),
+    category: Category.describe('Category'),
+    unit: Unit.describe('Unit: pc, slice, g, ml, level, or portion'),
+    emoji: ItemBody.shape.emoji.optional().describe('Emoji icon (default 🍽️)'),
+    step: ItemBody.shape.step.optional().describe('Stepper increment (default 50 for g/ml, else 1)'),
+    pack_size: ItemBody.shape.pack_size.optional().describe('Units per bought pack (default 1)'),
+    low_at: ItemBody.shape.low_at.optional().describe('Low-stock threshold, or null (default null)'),
+    owner_id: ItemBody.shape.owner_id.describe('User ID for personal item, or null/omitted for shared'),
+    is_cooked: ItemBody.shape.is_cooked.describe('Whether item is a cooked meal'),
+    portion_g: ItemBody.shape.portion_g.describe('Grams per 1 portion (for g-tracked meals)'),
+    expires_at: ItemBody.shape.expires_at.describe('Expiry date YYYY-MM-DD'),
+    shelf_life_days: ItemBody.shape.shelf_life_days.describe('Default shelf life in days on buy'),
+    kcal_per_unit: ItemBody.shape.kcal_per_unit.describe('Calories per 1 unit'),
+    protein_per_unit: ItemBody.shape.protein_per_unit.describe('Protein (g) per 1 unit'),
+    fat_per_unit: ItemBody.shape.fat_per_unit.describe('Fat (g) per 1 unit'),
+    barcode: ItemBody.shape.barcode.describe('Optional 6-14 digit barcode to link'),
+  };
+  const CreateItemArgs = z.object(createItemShape);
+
+  const updateItemShape = {
+    item_id: z.number().int().positive().describe('Active item ID to update'),
+    name: ItemPatch.shape.name.describe('Updated name'),
+    emoji: ItemPatch.shape.emoji.describe('Updated emoji'),
+    category: ItemPatch.shape.category.describe('Updated category'),
+    unit: ItemPatch.shape.unit.describe('Updated unit'),
+    step: ItemPatch.shape.step.describe('Updated step'),
+    pack_size: ItemPatch.shape.pack_size.describe('Updated pack_size'),
+    low_at: ItemPatch.shape.low_at.describe('Updated low_at threshold (or null)'),
+    owner_id: ItemPatch.shape.owner_id.describe('Updated owner_id (or null for shared)'),
+    is_cooked: ItemPatch.shape.is_cooked.describe('Updated is_cooked flag'),
+    portion_g: ItemPatch.shape.portion_g.describe('Updated portion_g'),
+    expires_at: ItemPatch.shape.expires_at.describe('Updated expires_at YYYY-MM-DD (or null)'),
+    shelf_life_days: ItemPatch.shape.shelf_life_days.describe('Updated shelf_life_days'),
+    kcal_per_unit: ItemPatch.shape.kcal_per_unit.describe('Updated kcal_per_unit'),
+    protein_per_unit: ItemPatch.shape.protein_per_unit.describe('Updated protein_per_unit'),
+    fat_per_unit: ItemPatch.shape.fat_per_unit.describe('Updated fat_per_unit'),
+    barcode: ItemPatch.shape.barcode.describe('Optional 6-14 digit barcode to link'),
+  };
+  const UpdateItemArgs = z.object(updateItemShape);
+
+  const createOneItem = (args: z.infer<typeof CreateItemArgs>, nowMs: number): HydratedItem => {
+    const parsed = ItemBody.parse({
+      ...args,
+      emoji: args.emoji ?? '🍽️',
+      step: args.step ?? (args.unit === 'g' || args.unit === 'ml' ? 50 : 1),
+      pack_size: args.pack_size ?? 1,
+      low_at: args.low_at ?? null,
+    });
+    d.createItem(db, parsed, nowMs);
+    const row = get<{ id: number }>(
+      db,
+      'SELECT id FROM items WHERE name_key = ? AND COALESCE(owner_id, 0) = ? AND archived_at IS NULL',
+      nameKey(parsed.name),
+      parsed.owner_id ?? 0,
+    )!;
+    return getHydratedItemById(db, row.id, nowMs)!;
+  };
+
+  const updateOneItem = ({ item_id, ...rest }: z.infer<typeof UpdateItemArgs>, nowMs: number): HydratedItem => {
+    d.patchItem(db, item_id, ItemPatch.parse(stripUndefined(rest)));
+    return getHydratedItemById(db, item_id, nowMs)!;
+  };
+
+  server.registerTool(
+    'batch_items',
+    {
+      title: 'Batch Create / Update / Archive Items',
+      description:
+        'Create, update, and archive many items in one atomic call (all succeed or nothing changes). Runs all creates, then all updates, then all archives, so one batch cannot create a name that a later update or archive in the same batch frees up (split those into two calls). Use this instead of repeated create_item/update_item/archive_item calls.',
+      inputSchema: {
+        create: z.array(CreateItemArgs).max(100).optional().describe('Items to create (same fields as create_item)'),
+        update: z.array(UpdateItemArgs).max(100).optional().describe('Item patches (same fields as update_item, item_id required)'),
+        archive: z.array(z.number().int().positive()).max(100).optional().describe('Item IDs to archive'),
+      },
+      annotations: DESTRUCTIVE_ANNOTATIONS,
+    },
+    ({ create = [], update = [], archive = [] }) => runTool(() => {
+      if (!create.length && !update.length && !archive.length) d.fail(400, 'Provide create, update, and/or archive');
+      const nowMs = now();
+      const step = <T, R>(label: string, list: T[], name: (x: T) => string, fn: (x: T) => R): R[] =>
+        list.map((x, i) => {
+          try {
+            return fn(x);
+          } catch (err) {
+            throw new Error(`${label}[${i}] (${name(x)}): ${errMessage(err)}. Nothing was changed.`);
+          }
+        });
+      const result = transaction(db, () => {
+        const created = step('create', create, a => a.name, a => createOneItem(a, nowMs));
+        const updated = step('update', update, a => `#${a.item_id}`, a => updateOneItem(a, nowMs));
+        const archived = step('archive', archive, id => `#${id}`, id => (d.archiveItem(db, id, nowMs), id));
+        return { created, updated, archived_item_ids: archived };
+      });
+      return okResult(
+        `Created ${result.created.length}, updated ${result.updated.length}, archived ${result.archived_item_ids.length} item(s).`,
+        { ...result, rev: getRev(db) },
+      );
+    }),
+  );
+
   server.registerTool(
     'create_item',
     {
       title: 'Create Item',
-      description: 'Create a new pantry or meal item (or revive a matching archived item).',
-      inputSchema: {
-        name: ItemBody.shape.name.describe('Item name (unique per owner scope)'),
-        category: Category.describe('Category'),
-        unit: Unit.describe('Unit: pc, slice, g, ml, level, or portion'),
-        emoji: ItemBody.shape.emoji.optional().describe('Emoji icon (default 🍽️)'),
-        step: ItemBody.shape.step.optional().describe('Stepper increment (default 50 for g/ml, else 1)'),
-        pack_size: ItemBody.shape.pack_size.optional().describe('Units per bought pack (default 1)'),
-        low_at: ItemBody.shape.low_at.optional().describe('Low-stock threshold, or null (default null)'),
-        owner_id: ItemBody.shape.owner_id.describe('User ID for personal item, or null/omitted for shared'),
-        is_cooked: ItemBody.shape.is_cooked.describe('Whether item is a cooked meal'),
-        portion_g: ItemBody.shape.portion_g.describe('Grams per 1 portion (for g-tracked meals)'),
-        expires_at: ItemBody.shape.expires_at.describe('Expiry date YYYY-MM-DD'),
-        shelf_life_days: ItemBody.shape.shelf_life_days.describe('Default shelf life in days on buy'),
-        kcal_per_unit: ItemBody.shape.kcal_per_unit.describe('Calories per 1 unit'),
-        protein_per_unit: ItemBody.shape.protein_per_unit.describe('Protein (g) per 1 unit'),
-        fat_per_unit: ItemBody.shape.fat_per_unit.describe('Fat (g) per 1 unit'),
-        barcode: ItemBody.shape.barcode.describe('Optional 6-14 digit barcode to link'),
-      },
+      description: 'Create a new pantry or meal item (or revive a matching archived item). To create several, use batch_items.',
+      inputSchema: createItemShape,
       annotations: WRITE_ANNOTATIONS,
     },
     (args) => runTool(() => {
-      const nowMs = now();
-      const parsed = ItemBody.parse({
-        ...args,
-        emoji: args.emoji ?? '🍽️',
-        step: args.step ?? (args.unit === 'g' || args.unit === 'ml' ? 50 : 1),
-        pack_size: args.pack_size ?? 1,
-        low_at: args.low_at ?? null,
-      });
-      d.createItem(db, parsed, nowMs);
-      const ownerId = parsed.owner_id ?? null;
-      const row = get<{ id: number }>(
-        db,
-        'SELECT id FROM items WHERE name_key = ? AND COALESCE(owner_id, 0) = ? AND archived_at IS NULL',
-        nameKey(parsed.name),
-        ownerId ?? 0,
-      )!;
-      const item = getHydratedItemById(db, row.id, nowMs)!;
+      const item = createOneItem(args, now());
       return okResult(`Created ${item.emoji} ${item.name} (#${item.id}).`, { item, rev: getRev(db) });
     }),
   );
@@ -1026,32 +1135,12 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     'update_item',
     {
       title: 'Update Item',
-      description: 'Update metadata, thresholds, nutrition, expiry, ownership, or barcode of an existing active item.',
-      inputSchema: {
-        item_id: z.number().int().positive().describe('Active item ID to update'),
-        name: ItemPatch.shape.name.describe('Updated name'),
-        emoji: ItemPatch.shape.emoji.describe('Updated emoji'),
-        category: ItemPatch.shape.category.describe('Updated category'),
-        unit: ItemPatch.shape.unit.describe('Updated unit'),
-        step: ItemPatch.shape.step.describe('Updated step'),
-        pack_size: ItemPatch.shape.pack_size.describe('Updated pack_size'),
-        low_at: ItemPatch.shape.low_at.describe('Updated low_at threshold (or null)'),
-        owner_id: ItemPatch.shape.owner_id.describe('Updated owner_id (or null for shared)'),
-        is_cooked: ItemPatch.shape.is_cooked.describe('Updated is_cooked flag'),
-        portion_g: ItemPatch.shape.portion_g.describe('Updated portion_g'),
-        expires_at: ItemPatch.shape.expires_at.describe('Updated expires_at YYYY-MM-DD (or null)'),
-        shelf_life_days: ItemPatch.shape.shelf_life_days.describe('Updated shelf_life_days'),
-        kcal_per_unit: ItemPatch.shape.kcal_per_unit.describe('Updated kcal_per_unit'),
-        protein_per_unit: ItemPatch.shape.protein_per_unit.describe('Updated protein_per_unit'),
-        fat_per_unit: ItemPatch.shape.fat_per_unit.describe('Updated fat_per_unit'),
-        barcode: ItemPatch.shape.barcode.describe('Optional 6-14 digit barcode to link'),
-      },
+      description: 'Update metadata, thresholds, nutrition, expiry, ownership, or barcode of an existing active item. To update several, use batch_items.',
+      inputSchema: updateItemShape,
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
     },
-    ({ item_id, ...rest }) => runTool(() => {
-      const patch = ItemPatch.parse(stripUndefined(rest));
-      d.patchItem(db, item_id, patch);
-      const item = getHydratedItemById(db, item_id, now())!;
+    (args) => runTool(() => {
+      const item = updateOneItem(args, now());
       return okResult(`Updated ${item.emoji} ${item.name} (#${item.id}).`, { item, rev: getRev(db) });
     }),
   );
@@ -1080,7 +1169,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       inputSchema: {
         user_id: z.number().int().positive().optional().describe('User ID (optional only when household has 1 user)'),
         kind: Kind.describe('Event kind: buy, eat, or adjust'),
-        lines: EventBody.shape.lines.describe('Lines to log; qty >= 0. For level items, buy qty is containers bought (usually 1), eat qty is the remaining level of the open container (1, 0.5, 0.25, or 0), and adjust qty is the exact total container count.'),
+        lines: z.array(McpLineIn).min(1).max(60).describe('Lines to log, each with item_id or item (name); qty >= 0. For level items, buy qty is containers bought (usually 1), eat qty is the remaining level of the open container (1, 0.5, 0.25, or 0), and adjust qty is the exact total container count.'),
         cost_cents: EventBody.shape.cost_cents.describe('Total event cost in minor currency units'),
         expires_at: z.string().regex(ISO_DATE_RE, 'Expected YYYY-MM-DD').nullish().describe('Default expiry YYYY-MM-DD applied to bought lines lacking per-line expires_at'),
         note: EventBody.shape.note.describe('Optional event note'),
@@ -1095,7 +1184,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       const nowMs = now();
       const uid = resolveUserId(db, args.user_id, opts?.defaultUserId);
       const cid = args.cid ?? `mcp-${randomUUID()}`;
-      const lines = args.lines.map(l => ({
+      const lines = resolveLines(db, 'lines', args.lines, uid).map(l => ({
         ...l,
         ...(args.expires_at != null && l.expires_at == null ? { expires_at: args.expires_at } : {}),
       }));
@@ -1146,17 +1235,19 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       description: 'Replace lines, cost_cents, or note of an active event (enforces weekly expense locks and updates nutrition snapshots). Level purchases add containers, level eats set the open container level, and level adjustments set the exact total; older absolute level purchase events retain their original meaning when edited.',
       inputSchema: {
         cid: z.string().trim().min(1).max(64).describe('Event cid to edit'),
-        lines: EventPatch.shape.lines.describe('Replacement lines. For level items, buy qty adds containers, eat qty sets the open container level, and adjust qty sets the exact total count.'),
+        lines: z.array(McpLineIn).min(1).max(60).describe('Replacement lines, each with item_id or item (name). For level items, buy qty adds containers, eat qty sets the open container level, and adjust qty sets the exact total count.'),
         cost_cents: EventPatch.shape.cost_cents.describe('Updated total cost_cents'),
         note: EventPatch.shape.note.describe('Updated note'),
       },
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
     },
     (args) => runTool(async () => {
-      requireActiveItems(db, args.lines.map(l => l.item_id));
+      const owner = get<{ user_id: number }>(db, 'SELECT user_id FROM events WHERE cid = ?', args.cid);
+      const lines = resolveLines(db, 'lines', args.lines, owner?.user_id ?? null);
+      requireActiveItems(db, lines.map(l => l.item_id));
       const patch = EventPatch.parse(
         stripUndefined({
-          lines: args.lines,
+          lines,
           cost_cents: args.cost_cents,
           note: args.note,
         }),
@@ -1187,7 +1278,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         kcal_total: CookBody.shape.kcal_total.describe('Fallback total kcal, used only when no ingredient has calorie data (otherwise summed from ingredients)'),
         protein_total: CookBody.shape.protein_total.describe('Fallback total protein (g), used only when no ingredient has protein data (otherwise summed from ingredients)'),
         fat_total: CookBody.shape.fat_total.describe('Fallback total fat (g), used only when no ingredient has fat data (otherwise summed from ingredients)'),
-        ingredients: z.array(CookIngredientIn).max(30).optional().describe('Raw ingredients consumed (defaults to [])'),
+        ingredients: z.array(McpCookIngredientIn).max(30).optional().describe('Raw ingredients consumed, each with item_id or item (name) (defaults to [])'),
         at: z.number().int().positive().optional().describe('Optional unix ms timestamp (default now)'),
         cid: CookBody.shape.cid.optional().describe('Optional idempotency batch cid'),
       },
@@ -1215,7 +1306,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         kcal_total: args.kcal_total ?? null,
         protein_total: args.protein_total ?? null,
         fat_total: args.fat_total ?? null,
-        ingredients: args.ingredients ?? [],
+        ingredients: resolveLines(db, 'ingredients', args.ingredients ?? [], uid),
       });
       const res = d.applyCookBatch(db, uid, body, {
         now: nowMs,
@@ -1245,7 +1336,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         name: PresetBody.shape.name.describe('Preset name'),
         emoji: PresetBody.shape.emoji.optional().describe('Preset emoji (default 🍳)'),
         hour: PresetBody.shape.hour.optional().describe('Typical local hour 0-23.99 (default 12)'),
-        lines: PresetBody.shape.lines.describe('Items and quantities in this preset'),
+        lines: z.array(McpLineIn).min(1).max(30).describe('Items and quantities, each with item_id or item (name)'),
       },
       annotations: WRITE_ANNOTATIONS,
     },
@@ -1255,7 +1346,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         name: args.name,
         emoji: args.emoji ?? '🍳',
         hour: args.hour ?? 12,
-        lines: args.lines,
+        lines: resolveLines(db, 'lines', args.lines, uid),
       });
       d.createPreset(db, uid, body);
       const presets = d.listPresets(db, uid);
@@ -1282,6 +1373,34 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       const uid = resolveUserId(db, user_id, opts?.defaultUserId);
       d.deletePreset(db, uid, preset_id);
       return okResult(`Deleted preset #${preset_id}.`, { deleted_preset_id: preset_id, rev: getRev(db) });
+    }),
+  );
+
+  server.registerTool(
+    'update_preset',
+    {
+      title: 'Update Meal Preset',
+      description: 'Rename a preset or change its emoji, hour, or lines. Omitted fields keep their current value; lines replaces the whole list.',
+      inputSchema: {
+        preset_id: z.number().int().positive().describe('Preset ID to update'),
+        user_id: z.number().int().positive().optional().describe('Owner user ID (optional when household has 1 user)'),
+        name: PresetBody.shape.name.optional().describe('New name'),
+        emoji: PresetBody.shape.emoji.optional().describe('New emoji'),
+        hour: PresetBody.shape.hour.optional().describe('New typical local hour 0-23.99'),
+        lines: z.array(McpLineIn).min(1).max(30).optional().describe('Replacement items and quantities, each with item_id or item (name)'),
+      },
+      annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
+    },
+    ({ preset_id, user_id, lines, ...patch }) => runTool(() => {
+      const uid = resolveUserId(db, user_id, opts?.defaultUserId);
+      const cur = d.listPresets(db, uid).find(p => p.id === preset_id);
+      if (!cur) d.fail(404, 'No such preset for this user');
+      const nextLines = lines ? resolveLines(db, 'lines', lines, uid) : cur.lines;
+      // Archiving an item drops it from presets, so a preset can end up empty.
+      if (!nextLines.length) d.fail(400, 'Preset has no items left; pass lines');
+      d.patchPreset(db, uid, preset_id, PresetBody.parse({ name: cur.name, emoji: cur.emoji, hour: cur.hour, ...stripUndefined(patch), lines: nextLines }));
+      const preset = d.listPresets(db, uid).find(p => p.id === preset_id)!;
+      return okResult(`Updated preset ${preset.emoji} ${preset.name} (#${preset.id}).`, { preset, rev: getRev(db) });
     }),
   );
 
