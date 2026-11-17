@@ -3,6 +3,7 @@ import { Idiomorph } from 'idiomorph';
 import { ApiError } from '../src/web/api.ts';
 import { html, htmlToString } from '../src/web/html.ts';
 import { flush } from '../src/web/outbox.ts';
+import { isoDate } from '../src/shared/dates.ts';
 import { applyOps } from '../src/shared/stock.ts';
 import type { BarcodeLookup, PendingOp, State } from '../src/shared/types.ts';
 import { enqueueEvent, enqueueUndo, newStore, openSheet, qOf, receive, setQ, stepQ, store as singletonStore, view } from '../src/web/store.ts';
@@ -555,6 +556,66 @@ describe('siri shortcuts and guest card', () => {
     expect(root).toContain('data-a="tab"'); // tab bar stays
     const key: Record<string, string> = { profile: 'data-a="saveMe"', presets: 'data-s="presetEdit"' };
     for (const [p, needle] of Object.entries(key)) { s.ui.page = ['settings', p]; expect(appHtml(s)).toContain(needle); }
+  });
+  test('goals page renders four inputs prefilled from me.goals; Nutrition goals row is in settings', () => {
+    const s = fresh();
+    s.server!.me.goals = { kcal: 2000, protein_g: 120, fat_g: null, carbs_g: 250.5 };
+    s.ui.page = ['settings'];
+    expect(appHtml(s)).toContain('data-p="goals"');
+    s.ui.page = ['settings', 'goals'];
+    const out = appHtml(s);
+    expect(out).toContain('data-a="saveGoals"');
+    for (const [k, v] of [['kcal', '2000'], ['protein_g', '120'], ['fat_g', ''], ['carbs_g', '250.5']]) expect(out).toMatch(new RegExp(`data-f="goal_${k}" value="${v}"`));
+  });
+  test('saveGoals rejects non-positive input without sending a request', async () => {
+    const s = singletonStore;
+    s.server = structuredClone(fixture);
+    s.ui.f.goal_kcal = '0';
+    vi.stubGlobal('window', { setTimeout: () => 0, clearTimeout: () => {} });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      await actions.saveGoals!({ dataset: {} } as unknown as HTMLElement);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(s.ui.toast?.msg).toContain('positive');
+    } finally { fetchSpy.mockRestore(); vi.unstubAllGlobals(); delete s.ui.f.goal_kcal; }
+  });
+  describe('Today card on Me', () => {
+    const day = (user_id: number, kcal: number, carbs_g: number | null = 100) => ({ day: isoDate(Date.now()), user_id, kcal, protein_g: 50, fat_g: 30, carbs_g });
+    const meHtml = (goals: Partial<State['me']['goals']>, daily: State['daily_nutrition']) => {
+      const s = fresh();
+      s.server!.me.goals = { kcal: null, protein_g: null, fat_g: null, carbs_g: null, ...goals };
+      s.server!.daily_nutrition = daily;
+      s.ui.tab = 'me';
+      return appHtml(s);
+    };
+    test('no goals: bare numbers, no bars, Set goals link', () => {
+      const out = meHtml({}, [day(1, 1240)]);
+      expect(out).toContain('1,240 kcal');
+      expect(out).not.toContain('class="bar');
+      expect(out).toContain('data-a="go" data-p="goals"');
+    });
+    test('with goals: value / goal, bars, no Set goals link', () => {
+      const out = meHtml({ kcal: 2000, protein_g: 100 }, [day(1, 1240)]);
+      expect(out).toContain('1,240 / 2,000 kcal');
+      expect(out).toContain('50 / 100 g');
+      expect(out).toContain('width:62%');
+      expect(out).not.toContain('data-p="goals"');
+    });
+    test('over goal: full bar with over style, number not clamped', () => {
+      const out = meHtml({ kcal: 2000 }, [day(1, 2500)]);
+      expect(out).toContain('2,500 / 2,000 kcal');
+      expect(out).toContain('class="bar over"');
+      expect(out).toContain('width:100%');
+    });
+    test('carbs null shows a dash', () => {
+      expect(meHtml({ carbs_g: 200 }, [day(1, 500, null)])).toContain('—');
+    });
+    test('only the signed-in user counts', () => {
+      const out = meHtml({}, [day(1, 700), day(2, 900)]);
+      expect(out).toContain('700 kcal');
+      expect(out).not.toContain('1,600');
+      expect(out).not.toContain('900');
+    });
   });
   test('shortcutText names the endpoints and the mode of each shortcut', () => {
     const ai = shortcutText('ai', 'https://x.test', 'tok');
