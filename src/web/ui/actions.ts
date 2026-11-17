@@ -161,7 +161,7 @@ function confirmOverdraw(v: State, lines: { item_id: number; qty: number }[]): b
 
 const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   rerender: () => {},
-  go: el => { s.ui.page.push(el.dataset.p!); history.pushState(null, ''); window.scrollTo(0, 0); },
+  go: el => { s.ui.newToken = null; s.ui.page.push(el.dataset.p!); history.pushState(null, ''); window.scrollTo(0, 0); },
   back: () => history.back(),
   tab: el => { stopScanner(s); if (s.ui.page.length) history.go(-s.ui.page.length); s.ui.tab = el.dataset.tab as Tab; s.ui.page = []; window.scrollTo(0, 0); },
   close: () => { stopScanner(s); closeSheet(s); },

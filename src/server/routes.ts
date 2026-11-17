@@ -272,7 +272,7 @@ export function createApp(deps: Deps): Hono<Env> {
   // ---- api tokens & shortcut ----
   app.post('/api/tokens', async c => {
     const body = parse(TokenBody, await json(c));
-    const { token, info } = createApiToken(db, c.get('uid'), body.name, now());
+    const { token, info } = createApiToken(db, c.get('uid'), body.name, now(), body.scope);
     bumpRev(db);
     return c.json({ token, info, state: state(c.get('uid')) });
   });
@@ -439,17 +439,21 @@ export function createApp(deps: Deps): Hono<Env> {
 
   app.all('/api/*', () => d.fail(404, 'Not found'));
 
-  // ---- MCP Streamable HTTP (stateless, authenticated by MCP_SECRET only) ----
+  // ---- MCP Streamable HTTP (stateless, authenticated by MCP_SECRET or a per-user mcp token) ----
   app.all('/mcp/:token?', async c => {
     c.header('Cache-Control', 'no-store');
     const secret = deps.mcpSecret?.trim();
-    if (!secret) {
-      return c.json({ error: 'MCP server is disabled (MCP_SECRET not set)' }, 503);
-    }
     const provided = extractMcpSecret(c);
-    if (!provided || !sameSecret(provided, secret)) {
-      c.header('WWW-Authenticate', 'Bearer');
-      return c.json({ error: 'Unauthorized' }, 401);
+    let forcedUserId: number | undefined;
+    if (!(secret && provided && sameSecret(provided, secret))) {
+      // Per-user token (scope mcp): binds every tool to its owner.
+      const tok = findApiToken(db, provided ?? undefined, now());
+      if (tok && tok.scopes.split(',').map(s => s.trim()).includes('mcp')) forcedUserId = tok.userId;
+      else if (!secret) return c.json({ error: 'MCP server is disabled (MCP_SECRET not set)' }, 503);
+      else {
+        c.header('WWW-Authenticate', 'Bearer');
+        return c.json({ error: 'Unauthorized' }, 401);
+      }
     }
     if (c.req.method !== 'POST') {
       return c.json(
@@ -466,6 +470,7 @@ export function createApp(deps: Deps): Hono<Env> {
       now,
       build,
       lookupBarcode: deps.lookupBarcode,
+      forcedUserId,
       onLowCrossings: pushLow,
     });
     try {

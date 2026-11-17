@@ -9,6 +9,8 @@ export interface McpCtx {
   db: Db;
   now: () => number;
   defaultUserId?: number;
+  /** Per-user MCP token: wins over any user_id tool argument. */
+  forcedUserId?: number;
 }
 
 export const READ_ANNOTATIONS: ToolAnnotations = {
@@ -72,8 +74,8 @@ export async function runTool(fn: () => ReturnType<typeof okResult> | Promise<Re
   }
 }
 
-export function resolveUserId(db: Db, requested?: number, defaultUserId?: number): number {
-  const target = requested ?? defaultUserId;
+export function resolveUserId(db: Db, requested?: number, defaultUserId?: number, forcedUserId?: number): number {
+  const target = forcedUserId ?? requested ?? defaultUserId;
   if (target !== undefined) {
     const u = get<{ id: number }>(db, 'SELECT id FROM users WHERE id = ?', target);
     if (!u) d.fail(400, `Unknown user_id: ${target}`);

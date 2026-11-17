@@ -8,7 +8,7 @@ import { DESTRUCTIVE_ANNOTATIONS, READ_ANNOTATIONS, WRITE_ANNOTATIONS, okResult,
 import type { McpCtx } from '../mcp-kit.ts';
 import { addExpense, exportExpenses, lockExpensePeriod } from './repo.ts';
 
-export function registerSpendTools(server: McpServer, { db, now, defaultUserId }: McpCtx): void {
+export function registerSpendTools(server: McpServer, { db, now, defaultUserId, forcedUserId }: McpCtx): void {
   server.registerTool(
     'list_expenses',
     {
@@ -84,7 +84,7 @@ export function registerSpendTools(server: McpServer, { db, now, defaultUserId }
     },
     (args) => runTool(() => {
       const nowMs = now();
-      const uid = resolveUserId(db, args.user_id, defaultUserId);
+      const uid = resolveUserId(db, args.user_id, defaultUserId, forcedUserId);
       const cid = args.cid ?? `mcp-exp-${randomUUID()}`;
       const body = ExpenseBody.parse({
         cid,
@@ -120,7 +120,7 @@ export function registerSpendTools(server: McpServer, { db, now, defaultUserId }
     },
     (args) => runTool(() => {
       const nowMs = now();
-      const uid = resolveUserId(db, args.user_id, defaultUserId);
+      const uid = resolveUserId(db, args.user_id, defaultUserId, forcedUserId);
       const body = LockPeriodBody.parse({ period: args.period, note: args.note ?? null });
       lockExpensePeriod(db, uid, body, nowMs);
       const lock = get<{

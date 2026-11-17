@@ -972,3 +972,74 @@ test('lines accept item names; get_state is compact by default; empty preset giv
     await client.close();
   }
 });
+
+const INIT = {
+  jsonrpc: '2.0', id: 1, method: 'initialize',
+  params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } },
+};
+const addBob = () => db.prepare('INSERT INTO users(name, emoji, code_hash, created_at) VALUES (?, ?, ?, 0)').run('Bob', '🐻', sha256('bbbb-bbbb-bbbb'));
+
+test('/mcp per-user token: works with and without MCP_SECRET; shortcut and revoked tokens stay out; 503/401 split', async () => {
+  const { token } = createApiToken(db, 1, 'Claude', clock, 'mcp');
+  const { token: shortcutTok } = createApiToken(db, 1, 'Siri', clock);
+  for (const a of [app, makeApp(undefined)]) {
+    expect((await rpc(a, INIT, { Authorization: `Bearer ${token}` })).status).toBe(200);
+    const path = await a.request(`/mcp/${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify(INIT),
+    });
+    expect(path.status).toBe(200);
+  }
+  // shortcut scope never opens /mcp: 401 with a secret set, 503 without
+  expect((await rpc(app, INIT, { Authorization: `Bearer ${shortcutTok}` })).status).toBe(401);
+  expect((await rpc(makeApp(undefined), INIT, { Authorization: `Bearer ${shortcutTok}` })).status).toBe(503);
+  expect((await rpc(app, INIT, { Authorization: 'Bearer mf_nope' })).status).toBe(401);
+  // global secret still works
+  expect((await rpc(app, INIT)).status).toBe(200);
+  db.prepare('UPDATE api_tokens SET revoked_at = 1 WHERE scopes = ?').run('mcp');
+  expect((await rpc(app, INIT, { Authorization: `Bearer ${token}` })).status).toBe(401);
+});
+
+test('mcp-scoped token is refused by /api routes (Bearer)', async () => {
+  const { token } = createApiToken(db, 1, 'Claude', clock, 'mcp');
+  const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  expect((await app.request('/api/shortcut', { method: 'POST', headers: h, body: '{"text":"x"}' })).status).toBe(403);
+  expect((await app.request('/api/shortcut/meals', { headers: h })).status).toBe(403);
+  expect((await app.request('/api/state', { headers: h })).status).toBe(403);
+});
+
+test('POST /api/tokens takes scope (default shortcut, rejects unknown)', async () => {
+  const login = await app.request('/api/login', {
+    method: 'POST', headers: { 'X-MyFood': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 'aaaa-aaaa-aaaa' }),
+  });
+  const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+  const mk = (body: unknown) => app.request('/api/tokens', {
+    method: 'POST', headers: { 'X-MyFood': '1', 'Content-Type': 'application/json', cookie }, body: JSON.stringify(body),
+  });
+  expect(((await (await mk({ name: 'a' })).json()) as { info: { scopes: string } }).info.scopes).toBe('shortcut');
+  expect(((await (await mk({ name: 'b', scope: 'mcp' })).json()) as { info: { scopes: string } }).info.scopes).toBe('mcp');
+  expect((await mk({ name: 'c', scope: 'admin' })).status).toBe(400);
+});
+
+test('per-user token binds tools to its user: user_id argument is ignored', async () => {
+  addBob();
+  const { token } = createApiToken(db, 1, 'Alice MCP', clock, 'mcp');
+  const { client, transport } = await connectClient(app, { Authorization: `Bearer ${token}` });
+  const milk = parseJsonResult(await client.callTool({ name: 'create_item', arguments: { name: 'Milk', category: 'drinks', unit: 'ml' } }));
+  const id = (milk.item as { id: number }).id;
+  // with 2 users and no user_id the global secret would fail as ambiguous; the token just acts as Alice
+  const own = parseJsonResult(await client.callTool({ name: 'log_event', arguments: { kind: 'buy', lines: [{ item_id: id, qty: 5 }] } }));
+  expect((own.event as { user_id: number }).user_id).toBe(1);
+  // asking to act as Bob (2) still acts as Alice
+  const other = parseJsonResult(await client.callTool({ name: 'log_event', arguments: { user_id: 2, kind: 'buy', lines: [{ item_id: id, qty: 5 }] } }));
+  expect((other.event as { user_id: number }).user_id).toBe(1);
+  // read filters are forced too
+  const evs = parseJsonResult(await client.callTool({ name: 'list_events', arguments: { user_id: 2 } }));
+  expect((evs.events as { user_id: number }[]).every(e => e.user_id === 1)).toBe(true);
+  expect((evs.events as unknown[]).length).toBe(2);
+  const nut = parseJsonResult(await client.callTool({ name: 'get_daily_nutrition', arguments: { user_id: 2 } }));
+  expect(nut.user_id).toBe(1);
+  await transport.close();
+  await client.close();
+});

@@ -576,6 +576,56 @@ describe('siri shortcuts and guest card', () => {
     expect(hh).toContain('data-a="newGuestCode"');
     expect(hh).toContain('data-a="saveSettings"');
   });
+  test('MCP page: own row, tokens filtered per page, connector URL shown once, create sends scope mcp', async () => {
+    const s = fresh();
+    s.server!.tokens.push({ id: 2, name: 'Claude', prefix: 'mf_mcp001', scopes: 'mcp', created_at: 0, last_used_at: null });
+    s.ui.page = ['settings'];
+    expect(appHtml(s)).toContain('data-p="mcp"');
+    s.ui.page = ['mcp'];
+    const out = appHtml(s);
+    expect(out).toContain('data-scope="mcp"');
+    expect(out).toContain('id="mcp-tok-2"');
+    expect(out).not.toContain('iPhone Siri');
+    expect(out).toContain('claude mcp add --transport http myfood');
+    s.ui.newToken = 'mf_secret123';
+    expect(appHtml(s)).toMatch(/\/mcp\/mf_secret123/);
+    expect(appHtml(s)).toContain('data-a="copyMcpUrl"');
+    s.ui.page = ['siri'];
+    const siri = appHtml(s);
+    expect(siri).toContain('iPhone Siri');
+    expect(siri).not.toContain('Claude</b>');
+
+    let sent: Record<string, unknown> | undefined;
+    vi.stubGlobal('navigator', { onLine: true });
+    vi.stubGlobal('window', { setTimeout: () => 0, clearTimeout: () => {}, scrollTo: () => {} });
+    vi.stubGlobal('history', { pushState() {} });
+    vi.stubGlobal('document', { getElementById: () => null, documentElement: { classList: { toggle() {} } }, activeElement: null, querySelector: () => null, title: '' });
+    vi.stubGlobal('fetch', async (_p: string, init: RequestInit) => {
+      sent = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ token: 'mf_new', info: {}, state: fixture }));
+    });
+    const morph = vi.spyOn(Idiomorph, 'morph').mockImplementation(() => []);
+    const prevServer = singletonStore.server, prevName = singletonStore.ui.f.tokenName;
+    try {
+      singletonStore.server = structuredClone(fixture);
+      singletonStore.ui.f.tokenName = 'Claude';
+      await actions.createToken!({ dataset: { scope: 'mcp' } } as unknown as HTMLElement);
+      expect(sent).toEqual({ name: 'Claude', scope: 'mcp' });
+      expect(singletonStore.ui.newToken).toBe('mf_new');
+      singletonStore.ui.f.tokenName = 'Siri';
+      await actions.createToken!({ dataset: {} } as unknown as HTMLElement);
+      expect(sent).toEqual({ name: 'Siri', scope: 'shortcut' });
+      // navigating to another page drops the fresh token so it can't leak across pages
+      actions.go!({ dataset: { p: 'siri' } } as unknown as HTMLElement);
+      expect(singletonStore.ui.newToken).toBeNull();
+      singletonStore.ui.page = [];
+    } finally {
+      morph.mockRestore();
+      vi.unstubAllGlobals();
+      singletonStore.server = prevServer;
+      singletonStore.ui.f.tokenName = prevName ?? '';
+    }
+  });
   test('Me shows the settings gear; settings pages render their controls with a Back button', () => {
     const s = fresh();
     s.ui.tab = 'me';

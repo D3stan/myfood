@@ -44,6 +44,7 @@ export interface MyFoodMcpOptions {
   now?: () => number;
   build?: string;
   defaultUserId?: number;
+  forcedUserId?: number;
   lookupBarcode?: BarcodeLookupFn;
   onLowCrossings?: (prevStocks: Map<number, number>) => Promise<void>;
 }
@@ -119,8 +120,8 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return out;
 }
 
-function resolveReadUserId(db: Db, requested?: number, defaultUserId?: number): number | null {
-  const target = requested ?? defaultUserId;
+function resolveReadUserId(db: Db, requested?: number, defaultUserId?: number, forcedUserId?: number): number | null {
+  const target = forcedUserId ?? requested ?? defaultUserId;
   if (target !== undefined) {
     const u = get<{ id: number }>(db, 'SELECT id FROM users WHERE id = ?', target);
     if (!u) d.fail(400, `Unknown user_id: ${target}`);
@@ -540,7 +541,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     ({ user_id, full, compact: compactArg }) => runTool(() => {
       const compact = !full && compactArg !== false;
       const nowMs = now();
-      const uid = resolveReadUserId(db, user_id, opts?.defaultUserId);
+      const uid = resolveReadUserId(db, user_id, opts?.defaultUserId, opts?.forcedUserId);
       const currency = getMeta(db, 'currency') ?? 'kr';
       const rev = getRev(db);
 
@@ -709,7 +710,8 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       },
       annotations: READ_ANNOTATIONS,
     },
-    ({ user_id, kind, source, item_id, limit, include_undone, before_at, before_seq, format }) => runTool(() => {
+    ({ user_id: userArg, kind, source, item_id, limit, include_undone, before_at, before_seq, format }) => runTool(() => {
+      const user_id = opts?.forcedUserId ?? userArg;
       const conds: string[] = [];
       const params: (string | number)[] = [];
       if (!include_undone) conds.push('e.undone_at IS NULL');
@@ -766,7 +768,8 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       },
       annotations: READ_ANNOTATIONS,
     },
-    ({ user_id }) => runTool(() => {
+    ({ user_id: userArg }) => runTool(() => {
+      const user_id = opts?.forcedUserId ?? userArg;
       let presets: (Preset & { user_name?: string })[];
       if (user_id !== undefined) {
         const u = get<User>(db, 'SELECT id, name, emoji FROM users WHERE id = ?', user_id);
@@ -980,7 +983,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     },
     (args) => runTool(async () => {
       const nowMs = now();
-      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId);
+      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId, opts?.forcedUserId);
       const cid = args.cid ?? `mcp-${randomUUID()}`;
       const lines = resolveLines(db, 'lines', args.lines, uid).map(l => ({
         ...l,
@@ -1085,7 +1088,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     },
     (args) => runTool(async () => {
       const nowMs = now();
-      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId);
+      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId, opts?.forcedUserId);
       const at = args.at ?? nowMs;
       const expiresAt = args.expires_at !== undefined
         ? args.expires_at
@@ -1141,7 +1144,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       annotations: WRITE_ANNOTATIONS,
     },
     (args) => runTool(() => {
-      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId);
+      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId, opts?.forcedUserId);
       const body = PresetBody.parse({
         name: args.name,
         emoji: args.emoji ?? '🍳',
@@ -1170,7 +1173,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       annotations: DESTRUCTIVE_ANNOTATIONS,
     },
     ({ preset_id, user_id }) => runTool(() => {
-      const uid = resolveUserId(db, user_id, opts?.defaultUserId);
+      const uid = resolveUserId(db, user_id, opts?.defaultUserId, opts?.forcedUserId);
       d.deletePreset(db, uid, preset_id);
       return okResult(`Deleted preset #${preset_id}.`, { deleted_preset_id: preset_id, rev: getRev(db) });
     }),
@@ -1192,7 +1195,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
     },
     ({ preset_id, user_id, lines, ...patch }) => runTool(() => {
-      const uid = resolveUserId(db, user_id, opts?.defaultUserId);
+      const uid = resolveUserId(db, user_id, opts?.defaultUserId, opts?.forcedUserId);
       const cur = d.listPresets(db, uid).find(p => p.id === preset_id);
       if (!cur) d.fail(404, 'No such preset for this user');
       const nextLines = lines ? resolveLines(db, 'lines', lines, uid) : cur.lines;
@@ -1225,7 +1228,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         d.fail(400, 'Provide preset_id or name');
       }
       const nowMs = now();
-      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId);
+      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId, opts?.forcedUserId);
       const presets = d.listPresets(db, uid);
       const matched = args.preset_id !== undefined
         ? presets.find(p => p.id === args.preset_id)
@@ -1386,7 +1389,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       }
       let updatedUser: { id: number; name: string; emoji: string; notify_low: boolean; notify_expiry: boolean } | null = null;
       if (hasUserUpdate) {
-        const uid = resolveUserId(db, args.user_id, opts?.defaultUserId);
+        const uid = resolveUserId(db, args.user_id, opts?.defaultUserId, opts?.forcedUserId);
         d.patchMe(
           db,
           uid,
@@ -1420,7 +1423,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     }),
   );
 
-  const ctx = { db, now, defaultUserId: opts?.defaultUserId };
+  const ctx = { db, now, defaultUserId: opts?.defaultUserId, forcedUserId: opts?.forcedUserId };
   registerNutritionTools(server, ctx);
   registerSpendTools(server, ctx);
 

@@ -9,7 +9,7 @@ import { dailyNutrition } from './repo.ts';
 
 const DAY_MS = 86_400_000;
 
-export function registerNutritionTools(server: McpServer, { db, now }: McpCtx): void {
+export function registerNutritionTools(server: McpServer, { db, now, forcedUserId }: McpCtx): void {
   server.registerTool(
     'get_daily_nutrition',
     {
@@ -21,7 +21,8 @@ export function registerNutritionTools(server: McpServer, { db, now }: McpCtx): 
       },
       annotations: READ_ANNOTATIONS,
     },
-    ({ days, user_id }) => runTool(() => {
+    ({ days, user_id: userArg }) => runTool(() => {
+      const user_id = forcedUserId ?? userArg;
       if (user_id !== undefined && !get(db, 'SELECT 1 FROM users WHERE id = ?', user_id)) {
         d.fail(400, `Unknown user_id: ${user_id}`);
       }

@@ -41,7 +41,11 @@ MyFood exposes an MCP server over both **remote Streamable HTTP** (`/mcp`) and *
 
 ### Remote Streamable HTTP (`/mcp`)
 
-The `/mcp` endpoint requires `MCP_SECRET` to be set and accepts requests with:
+**Per-user tokens.** Each member can create their own token in Settings → MCP and copy the connector URL `https://<host>/mcp/<token>` (or send it as `Authorization: Bearer <token>`). It works even when `MCP_SECRET` is unset, and every tool acts as that member: any `user_id` argument is ignored. Tokens with other scopes (Siri) don't open `/mcp`, and MCP tokens don't open `/api`. Revoke them on the same page.
+
+The global `MCP_SECRET` keeps working unchanged (`user_id` argument, otherwise the default user). With no `MCP_SECRET` and no valid MCP token the endpoint answers 503; a wrong token answers 401.
+
+The `/mcp` endpoint accepts `MCP_SECRET` (when set) in:
 
 ```
 Authorization: Bearer <MCP_SECRET>

@@ -25,7 +25,7 @@ export function siri({ st, ui }: V) {
           </div>
         </div>
       ` : ''}
-      ${st.tokens.length ? html`<div style="margin-top:10px">${st.tokens.map(t => html`
+      ${st.tokens.some(t => t.scopes === 'shortcut') ? html`<div style="margin-top:10px">${st.tokens.filter(t => t.scopes === 'shortcut').map(t => html`
         <div class="line" id="tok-${t.id}">
           <span class="n"><b>${t.name}</b> <span class="small muted">${t.prefix}… · ${isoDate(t.created_at)}</span></span>
           <button class="btn alt" data-a="revokeToken" data-id="${t.id}" ${ui.online ? '' : 'disabled'}>Revoke</button>

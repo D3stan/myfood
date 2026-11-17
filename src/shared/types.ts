@@ -457,7 +457,7 @@ export const LockPeriodBody = z.object({
 });
 export type LockPeriodBody = z.infer<typeof LockPeriodBody>;
 
-export const TokenBody = z.object({ name });
+export const TokenBody = z.object({ name, scope: z.enum(['shortcut', 'mcp']).default('shortcut') });
 export type TokenBody = z.infer<typeof TokenBody>;
 
 export const ShortcutBody = z.object({

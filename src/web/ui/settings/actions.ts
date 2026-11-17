@@ -108,18 +108,23 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
       toast(res.sent > 0 ? 'Test notification sent' : 'No active push subscription');
     } catch (e) { fail(e); }
   },
-  createToken: async () => {
+  createToken: async el => {
     const name = (s.ui.f.tokenName ?? '').trim();
     if (!name) return void toast('Give the token a name');
     if (!navigator.onLine) return void toast("You're offline");
     try {
-      const res = await createToken({ name });
+      const res = await createToken({ name, scope: el.dataset.scope === 'mcp' ? 'mcp' : 'shortcut' });
       s.ui.newToken = res.token;
       s.ui.f.tokenName = '';
       receive(s, res.state);
       toast('Token created — copy it now');
       afterState();
     } catch (e) { fail(e); }
+  },
+  copyMcpUrl: async () => {
+    if (!s.ui.newToken) return;
+    try { await navigator.clipboard.writeText(`${location.origin}/mcp/${s.ui.newToken}`); toast('Connector URL copied'); }
+    catch { toast('Copy failed — select and copy manually'); }
   },
   copyToken: async () => {
     if (!s.ui.newToken) return;
@@ -128,7 +133,7 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
   },
   revokeToken: async el => {
     const id = Number(el.dataset.id);
-    if (!id || !confirm('Revoke this Siri Shortcut token?')) return;
+    if (!id || !confirm('Revoke this token?')) return;
     if (!navigator.onLine) return void toast("You're offline");
     try {
       receive(s, await revokeToken(id));
