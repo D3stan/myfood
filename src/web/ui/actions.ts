@@ -15,6 +15,7 @@ import { cookBatchMacros } from './components/cook.ts';
 import { itemToFields, macroBasis } from './components/sheets.ts';
 import { afterState, commit, fail, hooks, mutate, parseOptCostCents, sheet, st, sync, toast } from './helpers.ts';
 import { shoppingText } from './screens/pantry.ts';
+import { frameActions } from './frame-actions.ts';
 import { settingsActions } from './settings/actions.ts';
 import { spendActions } from './spend/actions.ts';
 
@@ -635,4 +636,4 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   },
 };
 
-export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = { ...core, ...settingsActions, ...spendActions };
+export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = { ...core, ...settingsActions, ...spendActions, ...frameActions };

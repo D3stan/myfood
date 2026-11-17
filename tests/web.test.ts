@@ -611,7 +611,7 @@ describe('siri shortcuts and guest card', () => {
     } finally { fetchSpy.mockRestore(); vi.unstubAllGlobals(); delete s.ui.f.goal_kcal; }
   });
   describe('Today card on Me', () => {
-    const day = (user_id: number, kcal: number, carbs_g: number | null = 100) => ({ day: isoDate(Date.now()), user_id, kcal, protein_g: 50, fat_g: 30, carbs_g });
+    const day = (user_id: number, kcal: number, carbs_g: number | null = 100) => ({ day: isoDate(Date.now()), user_id, kcal, protein_g: 50, fat_g: 30, carbs_g, value_cents: 0, unpriced: 0 });
     const meHtml = (goals: Partial<State['me']['goals']>, daily: State['daily_nutrition']) => {
       const s = fresh();
       s.server!.me.goals = { kcal: null, protein_g: null, fat_g: null, carbs_g: null, ...goals };

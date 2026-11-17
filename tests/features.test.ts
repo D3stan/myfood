@@ -142,7 +142,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
   });
   expect(afterEat.items.find(i => i.id === meal.id)!.stock).toBe(900);
   expect(afterEat.usual[meal.id]).toBe(300);
-  expect(afterEat.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: afterEat.me.id, kcal: 600, protein_g: 37, fat_g: 19.7, carbs_g: 72.5 }]);
+  expect(afterEat.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: afterEat.me.id, kcal: 600, protein_g: 37, fat_g: 19.7, carbs_g: 72.5, value_cents: 0, unpriced: 1 }]);
   expect(s0.rev).toBeLessThan(afterEat.rev);
 
   // Archiving an ingredient prunes it from meal_recipes so cookSheet has no stale Unknown line
@@ -452,7 +452,7 @@ test('carbs: eat snapshots known carbs, unknown stays null (never 0), daily carb
   // Only an unknown-carbs line today: carbs_g is null, not 0.
   const e1 = await st('POST', '/api/events', { cid: 'carb-eat-1', at: clock, kind: 'eat', lines: [{ item_id: mystery!, qty: 100 }] });
   expect(e1.events[0]!.lines[0]!.carbs_g).toBeUndefined();
-  expect(e1.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: e1.me.id, kcal: 200, protein_g: 0, fat_g: 0, carbs_g: null }]);
+  expect(e1.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: e1.me.id, kcal: 200, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1 }]);
 
   // A known zero is a real 0; known carbs are summed, the unknown line adds nothing.
   await st('POST', '/api/events', { cid: 'carb-eat-2', at: clock + 1, kind: 'eat', lines: [{ item_id: zero!, qty: 100 }] });
@@ -574,4 +574,15 @@ test('item body accepts and clears cost_per_unit_cents, and rejects negatives', 
   expect(priceOf(await st('GET', '/api/state'), id)).toBe(3);
   expect(priceOf(await st('PATCH', `/api/items/${id}`, { cost_per_unit_cents: null }), id)).toBeNull();
   expect((await req('PATCH', `/api/items/${id}`, { cost_per_unit_cents: -1 })).status).toBe(400);
+});
+
+test('daily_nutrition value_cents sums eat lines, unpriced counts null ones, a value-only day still has a row', async () => {
+  await mk('Eggs', 'pc', { cost_per_unit_cents: 250 });
+  const s0 = await mk('Salt', 'pc');
+  const eggs = idOf(s0, 'Eggs'), salt = idOf(s0, 'Salt');
+  // No macros anywhere: the day exists only because of value / unpriced.
+  const s1 = await st('POST', '/api/events', { cid: 'dv-eat-1', at: clock - 2000, kind: 'eat', lines: [{ item_id: eggs, qty: 3 }, { item_id: salt, qty: 1 }] });
+  expect(s1.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: s1.me.id, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 750, unpriced: 1 }]);
+  const s2 = await st('POST', '/api/events', { cid: 'dv-eat-2', at: clock - 1000, kind: 'eat', lines: [{ item_id: eggs, qty: 1 }] });
+  expect(s2.daily_nutrition[0]).toMatchObject({ value_cents: 1000, unpriced: 1 });
 });

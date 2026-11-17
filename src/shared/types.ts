@@ -272,6 +272,10 @@ export interface DailyNutrition {
   fat_g: number;
   /** null = no counted line that day had carbs data. */
   carbs_g: number | null;
+  /** Sum of counted eat lines' value_cents (a lower bound: see `unpriced`). */
+  value_cents: number;
+  /** Counted eat lines with no value_cents. */
+  unpriced: number;
 }
 
 export interface BarcodeProduct {
@@ -323,7 +327,7 @@ export interface State {
   expense_locks: ExpenseLock[];
   /** Last 90 days of purchase/expense events (cost_cents != null), newest first. */
   expenses: FoodEvent[];
-  /** Last 30 days of daily nutrition totals per user. */
+  /** Last 90 days of daily nutrition totals per user. */
   daily_nutrition: DailyNutrition[];
   /** Passcode for the read-only /guest page. Only ever sent to signed-in people. */
   guest_code: string;

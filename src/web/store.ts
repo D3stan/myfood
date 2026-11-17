@@ -1,6 +1,7 @@
 // One store, plain data. What is shown is always applyOps(server, pending).
 // Functions take the store as their first argument so they can be tested without a DOM.
 import { applyOps } from '../shared/stock.ts';
+import type { Frame } from '../shared/period.ts';
 import type { AiCook, AiEvent, BarcodeLookup, EventBody, JobMode, PendingOp, State } from '../shared/types.ts';
 
 export type Tab = 'pantry' | 'spend' | 'history' | 'me';
@@ -46,6 +47,8 @@ export interface Ui {
   seenDone: Set<number>;
   ownerFilter: 'all' | 'mine' | 'shared';
   historyScope: 'me' | 'all';
+  /** Time-frame selector state per screen key ("me", "spend"); missing = week, current. */
+  frames: Record<string, { frame: Frame; offset: number }>;
   jobMode: JobMode;
   barcodeLookup: BarcodeLookup | null;
   barcodeBusy: boolean;
@@ -70,7 +73,7 @@ export const newStore = (server: State | null = null, pending: PendingOp[] = [])
   ui: {
     tab: 'pantry', page: [], sheet: null, f: {}, editing: null, toast: null,
     online: true, loggedOut: false, standalone: true, files: [], seenDone: new Set(),
-    ownerFilter: 'all', historyScope: 'me', jobMode: 'auto',
+    ownerFilter: 'all', historyScope: 'me', frames: {}, jobMode: 'auto',
     barcodeLookup: null, barcodeBusy: false, scannerActive: false, scannerSupported: false,
     newToken: null, pushSupported: false, pushPermission: 'default',
   },

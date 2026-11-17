@@ -43,27 +43,45 @@ export function eventNutrition(
   return { kcal: Math.round(kcal), protein_g: round1(protein_g), fat_g: round1(fat_g), carbs_g: carbs_g == null ? null : round1(carbs_g) };
 }
 
+/** Value of an eat event's lines (qty x item price, same rounding as the server snapshot); lines with no price are counted as unpriced. */
+export function eventValue(
+  ev: Pick<FoodEvent, 'kind' | 'counts_nutrition' | 'lines'>,
+  items: (Pick<Item, 'id'> & Partial<Pick<Item, 'cost_per_unit_cents'>>)[],
+): { value_cents: number; unpriced: number } {
+  let value_cents = 0, unpriced = 0;
+  if (ev.kind !== 'eat' || !ev.counts_nutrition) return { value_cents, unpriced };
+  const byId = new Map(items.map(i => [i.id, i]));
+  for (const l of ev.lines) {
+    if (l.is_set) continue;
+    const price = byId.get(l.item_id)?.cost_per_unit_cents;
+    const v = l.value_cents ?? (price != null ? Math.round(Math.abs(l.qty) * price) : null);
+    if (v == null) unpriced++; else value_cents += v;
+  }
+  return { value_cents, unpriced };
+}
+
 /** Merges server daily nutrition totals with pending unconfirmed eat/undo ops, or aggregates events directly. */
 export function computeDailyNutrition(
   events: FoodEvent[],
-  items: (Pick<Item, 'id'> & Partial<Pick<Item, Rates>>)[],
+  items: (Pick<Item, 'id'> & Partial<Pick<Item, Rates | 'cost_per_unit_cents'>>)[],
   serverDaily: DailyNutrition[] = [],
 ): DailyNutrition[] {
   const map = new Map<string, DailyNutrition>();
-  const add = (day: string, user_id: number, kcal: number, protein_g: number, fat_g: number, carbs_g: number | null) => {
+  const add = (day: string, user_id: number, kcal: number, protein_g: number, fat_g: number, carbs_g: number | null, value_cents = 0, unpriced = 0) => {
     const k = `${day}:${user_id}`;
     const cur = map.get(k);
     const c = addKnown(cur?.carbs_g, carbs_g);
     const carbs = c == null ? null : Math.max(0, round1(c));
-    if (cur) { cur.kcal = Math.max(0, Math.round(cur.kcal + kcal)); cur.protein_g = Math.max(0, round1(cur.protein_g + protein_g)); cur.fat_g = Math.max(0, round1(cur.fat_g + fat_g)); cur.carbs_g = carbs; }
-    else map.set(k, { day, user_id, kcal: Math.max(0, Math.round(kcal)), protein_g: Math.max(0, round1(protein_g)), fat_g: Math.max(0, round1(fat_g)), carbs_g: carbs });
+    if (cur) { cur.kcal = Math.max(0, Math.round(cur.kcal + kcal)); cur.protein_g = Math.max(0, round1(cur.protein_g + protein_g)); cur.fat_g = Math.max(0, round1(cur.fat_g + fat_g)); cur.carbs_g = carbs; cur.value_cents += value_cents; cur.unpriced += unpriced; }
+    else map.set(k, { day, user_id, kcal: Math.max(0, Math.round(kcal)), protein_g: Math.max(0, round1(protein_g)), fat_g: Math.max(0, round1(fat_g)), carbs_g: carbs, value_cents, unpriced });
   };
   if (serverDaily.length) {
-    for (const d of serverDaily) add(d.day, d.user_id, d.kcal, d.protein_g, d.fat_g ?? 0, d.carbs_g ?? null);
+    for (const d of serverDaily) add(d.day, d.user_id, d.kcal, d.protein_g, d.fat_g ?? 0, d.carbs_g ?? null, d.value_cents ?? 0, d.unpriced ?? 0);
   } else {
     for (const ev of events) {
       const n = eventNutrition(ev, items);
-      if (n.kcal > 0 || n.protein_g > 0 || n.fat_g > 0 || (n.carbs_g ?? 0) > 0) add(isoDate(ev.at), ev.user_id, n.kcal, n.protein_g, n.fat_g, n.carbs_g);
+      const v = eventValue(ev, items);
+      if (n.kcal > 0 || n.protein_g > 0 || n.fat_g > 0 || (n.carbs_g ?? 0) > 0 || v.value_cents > 0 || v.unpriced > 0) add(isoDate(ev.at), ev.user_id, n.kcal, n.protein_g, n.fat_g, n.carbs_g, v.value_cents, v.unpriced);
     }
   }
   return [...map.values()].sort((a, b) => (a.day === b.day ? a.user_id - b.user_id : b.day.localeCompare(a.day)));

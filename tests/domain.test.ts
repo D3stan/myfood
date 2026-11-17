@@ -263,7 +263,7 @@ test('nutrition snapshots on eat, daily_nutrition aggregation, and me/settings u
     lines: [{ item_id: oatsId, qty: 100 }],
   });
   expect(s1.events[0]!.lines[0]).toMatchObject({ item_id: oatsId, qty: -100, kcal: 370, protein_g: 13 });
-  expect(s1.daily_nutrition).toEqual([{ day: '1970-01-01', user_id: s1.me.id, kcal: 370, protein_g: 13, fat_g: 0, carbs_g: null }]);
+  expect(s1.daily_nutrition).toEqual([{ day: '1970-01-01', user_id: s1.me.id, kcal: 370, protein_g: 13, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1 }]);
 
   // Editing item macros later does not alter historical snapshot
   await st('PATCH', `/api/items/${oatsId}`, { kcal_per_unit: 10 });

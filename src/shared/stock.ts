@@ -1,6 +1,6 @@
 // The one place stock is computed. Server and web both use it, so they cannot disagree.
 import { daysUntil, isoDate } from './dates.ts';
-import { eventNutrition } from './nutrition.ts';
+import { eventNutrition, eventValue } from './nutrition.ts';
 import type { DailyNutrition, EventBody, EventLine, FoodEvent, Item, Kind, PendingOp, State, Unit } from './types.ts';
 
 const round = (n: number): number => Math.round(n * 1000) / 1000;
@@ -79,12 +79,12 @@ export function applyOps(server: State, ops: PendingOp[]): State {
   const dailyMap = new Map<string, DailyNutrition>(
     server.daily_nutrition.map(d => [`${d.day}:${d.user_id}`, { ...d }]),
   );
-  const bumpDaily = (day: string, user_id: number, dk: number, dp: number, df: number, dc: number | null) => {
-    if (!dk && !dp && !df && !dc) return;
+  const bumpDaily = (day: string, user_id: number, dk: number, dp: number, df: number, dc: number | null, dv = 0, du = 0) => {
+    if (!dk && !dp && !df && !dc && !dv && !du) return;
     const k = `${day}:${user_id}`;
     const cur = dailyMap.get(k);
-    if (cur) { cur.kcal = Math.max(0, Math.round(cur.kcal + dk)); cur.protein_g = Math.max(0, round1(cur.protein_g + dp)); cur.fat_g = Math.max(0, round1((cur.fat_g ?? 0) + df)); if (dc != null) cur.carbs_g = Math.max(0, round1((cur.carbs_g ?? 0) + dc)); }
-    else if (dk > 0 || dp > 0 || df > 0 || (dc ?? 0) > 0) dailyMap.set(k, { day, user_id, kcal: Math.round(dk), protein_g: round1(dp), fat_g: round1(df), carbs_g: dc == null ? null : round1(dc) });
+    if (cur) { cur.kcal = Math.max(0, Math.round(cur.kcal + dk)); cur.protein_g = Math.max(0, round1(cur.protein_g + dp)); cur.fat_g = Math.max(0, round1((cur.fat_g ?? 0) + df)); if (dc != null) cur.carbs_g = Math.max(0, round1((cur.carbs_g ?? 0) + dc)); cur.value_cents = Math.max(0, cur.value_cents + dv); cur.unpriced = Math.max(0, cur.unpriced + du); }
+    else if (dk > 0 || dp > 0 || df > 0 || (dc ?? 0) > 0 || dv > 0 || du > 0) dailyMap.set(k, { day, user_id, kcal: Math.round(dk), protein_g: round1(dp), fat_g: round1(df), carbs_g: dc == null ? null : round1(dc), value_cents: dv, unpriced: du });
   };
 
   for (const op of ops) {
@@ -93,8 +93,8 @@ export function applyOps(server: State, ops: PendingOp[]): State {
       if (!ev) continue;
       // shortcut: a set line cannot be reversed locally (the earlier amount is unknown), the server's answer fixes it.
       for (const l of ev.lines) { const it = byId.get(l.item_id); if (it && !l.is_set) it.stock = round(it.stock - l.qty); }
-      const n = eventNutrition(ev, items);
-      bumpDaily(isoDate(ev.at), ev.user_id, -n.kcal, -n.protein_g, -n.fat_g, n.carbs_g == null ? null : -n.carbs_g);
+      const n = eventNutrition(ev, items), v = eventValue(ev, items);
+      bumpDaily(isoDate(ev.at), ev.user_id, -n.kcal, -n.protein_g, -n.fat_g, n.carbs_g == null ? null : -n.carbs_g, -v.value_cents, -v.unpriced);
       events = events.filter(e => e.cid !== op.cid);
       expenses = expenses.filter(e => e.cid !== op.cid);
       continue;
@@ -119,8 +119,8 @@ export function applyOps(server: State, ops: PendingOp[]): State {
       preset_id: b.preset_id ?? null, cost_cents: b.cost_cents ?? null,
       counts_nutrition: true, lines,
     };
-    const n = eventNutrition(ev, items);
-    bumpDaily(isoDate(ev.at), ev.user_id, n.kcal, n.protein_g, n.fat_g, n.carbs_g);
+    const n = eventNutrition(ev, items), v = eventValue(ev, items);
+    bumpDaily(isoDate(ev.at), ev.user_id, n.kcal, n.protein_g, n.fat_g, n.carbs_g, v.value_cents, v.unpriced);
     events = [ev, ...events];
     if (ev.cost_cents != null) expenses = [ev, ...expenses];
   }

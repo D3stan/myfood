@@ -91,14 +91,14 @@ test('applyOps shows pending work on top of server state and updates nutrition a
   expect(out.usual[1]).toBe(2);
   expect(fixture.items.find(i => i.id === 1)!.stock).toBe(7);
   const today = isoDate(fixture.now);
-  expect(out.daily_nutrition.find(x => x.day === today && x.user_id === 1)).toEqual({ day: today, user_id: 1, kcal: 156, protein_g: 12.6, fat_g: 0, carbs_g: null });
+  expect(out.daily_nutrition.find(x => x.day === today && x.user_id === 1)).toEqual({ day: today, user_id: 1, kcal: 156, protein_g: 12.6, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1 });
   // once the server lists the event, the pending op adds nothing
   expect(applyOps(out, [eat]).items.find(i => i.id === 1)!.stock).toBe(5);
   // undo of a server event
   const undone = applyOps(fixture, [{ type: 'undo', cid: 'ev-00000003' }]);
   expect(undone.items.find(i => i.id === 6)!.stock).toBe(1000);
   expect(undone.events.some(e => e.cid === 'ev-00000003')).toBe(false);
-  expect(undone.daily_nutrition.find(x => x.day === isoDate(fixture.events[0]!.at) && x.user_id === 2)).toEqual({ day: isoDate(fixture.events[0]!.at), user_id: 2, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null });
+  expect(undone.daily_nutrition.find(x => x.day === isoDate(fixture.events[0]!.at) && x.user_id === 2)).toEqual({ day: isoDate(fixture.events[0]!.at), user_id: 2, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 0 });
   // optimistic buy with cost shows in expenses
   const buy = { type: 'event' as const, body: { cid: 'pending-buy-1', at: fixture.now, kind: 'buy' as const, lines: [{ item_id: 1, qty: 10 }], cost_cents: 3000 } };
   const bought = applyOps(fixture, [buy]);
@@ -254,4 +254,14 @@ test('openDb migrates a v3 database to v4 keeping its rows, with price and value
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('pending eat ops add value and unpriced to daily nutrition', () => {
+  const items = [{ id: 1, cost_per_unit_cents: 2.5 }, { id: 2, cost_per_unit_cents: null }];
+  const ev = { ...fixture.events[0]!, kind: 'eat' as const, counts_nutrition: true, at: fixture.now, user_id: 1,
+    lines: [{ item_id: 1, qty: -3, is_set: false }, { item_id: 2, qty: -1, is_set: false }] };
+  expect(computeDailyNutrition([ev], items)).toEqual([{ day: isoDate(fixture.now), user_id: 1, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 8, unpriced: 1 }]);
+  const eat = { type: 'event' as const, body: { cid: 'pv-1', at: fixture.now, kind: 'eat' as const, lines: [{ item_id: 1, qty: 2 }] } };
+  const out = applyOps({ ...fixture, items: fixture.items.map(i => i.id === 1 ? { ...i, cost_per_unit_cents: 100 } : i) }, [eat]);
+  expect(out.daily_nutrition.find(d => d.user_id === 1 && d.day === isoDate(fixture.now))).toMatchObject({ value_cents: 200, unpriced: 0 });
 });

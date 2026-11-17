@@ -247,7 +247,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     ),
   );
 
-  const daily_nutrition = dailyNutrition(db, env.now - 30 * DAY_MS);
+  const daily_nutrition = dailyNutrition(db, env.now - 90 * DAY_MS);
 
   const jobs: Job[] = all<{
     id: number;

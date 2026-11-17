@@ -1,5 +1,5 @@
 const pad2 = (n: number): string => String(n).padStart(2, '0');
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const ISO_WEEK_RE = /^\d{4}-W\d{2}$/;

@@ -85,8 +85,8 @@ export const fixture: State = {
   expense_locks: [{ period: isoWeek(now - 7 * 86_400_000), locked_by: 1, locked_at: now - 86_400_000, total_cents: 45000, event_count: 3, note: null }],
   expenses: [buyEv],
   daily_nutrition: [
-    { day: isoDate(now - 3_600_000 * 11), user_id: 2, kcal: 875, protein_g: 30, fat_g: 0, carbs_g: null },
-    { day: isoDate(now - 3_600_000 * 24), user_id: 1, kcal: 657, protein_g: 40.2, fat_g: 0, carbs_g: null },
+    { day: isoDate(now - 3_600_000 * 11), user_id: 2, kcal: 875, protein_g: 30, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 0 },
+    { day: isoDate(now - 3_600_000 * 24), user_id: 1, kcal: 657, protein_g: 40.2, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 0 },
   ],
   guest_code: 'abcd-2345',
 };
