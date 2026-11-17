@@ -8,12 +8,12 @@ import { clear, flush, save } from '../outbox.ts';
 import { closeSheet, enqueueEvent, enqueueUndo, openSheet, qOf, receive, setQ, stepQ, store as s, view } from '../store.ts';
 import type { Sheet, Tab } from '../store.ts';
 import { ISO_DATE_RE, addDays, isoDate, parseIsoDate } from '../../shared/dates.ts';
-import { isLow, shown } from '../../shared/stock.ts';
+import { isLow, levelParts, shown } from '../../shared/stock.ts';
 import { fmtNum, nameKey, parseCostCents, parseNum } from '../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../shared/types.ts';
 import type { Category, Item, Kind, LineIn, PendingOp, State, Unit } from '../../shared/types.ts';
 import { barcodeToFields, isBarcodeDetectorSupported, startBarcodeScanner, stopScanner } from './components/barcode.ts';
-import { hourToTime, levelName, timeToHour, unitOf } from './components/bits.ts';
+import { hourToTime, levelReadLabel, timeToHour, unitOf } from './components/bits.ts';
 import { cookBatchMacros } from './components/cook.ts';
 import { itemToFields, macroBasis } from './components/sheets.ts';
 import { render } from './render.ts';
@@ -81,7 +81,9 @@ function logged(kind: Kind, lines: LineIn[], msg: string, extra: { preset_id?: n
 const st = () => view(s)!;
 const item = (id: unknown) => st().items.find(i => i.id === Number(id));
 const sheet = () => s.ui.sheet!;
-const ate = (it: { name: string; unit: string }, q: number) => `Ate ${fmtNum(q)} ${it.unit === 'level' ? '' : `${it.unit} of `}${it.name}`;
+const ate = (it: { name: string; emoji: string; unit: string }, q: number) => it.unit === 'level'
+  ? levelReadLabel(it, q)
+  : `Ate ${fmtNum(q)} ${it.unit} of ${it.name}`;
 
 function shrink(file: File): Promise<Blob> {
   return createImageBitmap(file).then(bmp => {
@@ -343,8 +345,8 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     const it = item(sheet().id)!;
     const cost_cents = parseOptCostCents(s.ui.f.buyCost);
     if (cost_cents === 'invalid') return void toast('Check the cost');
-    const line: LineIn = { item_id: it.id, qty: it.pack_size, ...(cost_cents != null ? { cost_cents } : {}) };
-    logged('buy', [line], `Added a pack of ${it.name}`, cost_cents != null ? { cost_cents } : {});
+    const line: LineIn = { item_id: it.id, qty: it.unit === 'level' ? 1 : it.pack_size, ...(cost_cents != null ? { cost_cents } : {}) };
+    logged('buy', [line], it.unit === 'level' ? `Added a container of ${it.name}` : `Added a pack of ${it.name}`, cost_cents != null ? { cost_cents } : {});
     s.ui.f.buyCost = '';
     closeSheet(s);
   },
@@ -354,7 +356,7 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
   },
   level: el => {
     const it = item(sheet().id)!, q = Number(el.dataset.v);
-    logged('adjust', [{ item_id: it.id, qty: q }], `${it.name}: ${levelName(q)}`); closeSheet(s);
+    logged('eat', [{ item_id: it.id, qty: q }], levelReadLabel(it, levelParts(it.stock).sealed + q)); closeSheet(s);
   },
   more: () => { sheet().more = !sheet().more; },
   saveItem: async () => {

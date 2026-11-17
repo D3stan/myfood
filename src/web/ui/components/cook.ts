@@ -20,7 +20,7 @@ export function cookBatchMacros(
     const qty = q[String(id)] ?? 0;
     if (!(qty > 0)) continue;
     const it = items.find(i => i.id === id);
-    if (!it) continue;
+    if (!it || it.unit === 'level') continue;
     if (it.kcal_per_unit != null) { kcal += qty * it.kcal_per_unit; hasKcal = true; }
     if (it.protein_per_unit != null) { protein += qty * it.protein_per_unit; hasProtein = true; }
   }
@@ -31,7 +31,7 @@ export function cookSheet(v: V, sh: Sheet) {
   const { st, ui } = v;
   const cookedMeals = st.items.filter(i => i.is_cooked);
   const ids = sh.lines ?? [];
-  const free = st.items.filter(i => i.id !== sh.id && !ids.includes(i.id));
+  const free = st.items.filter(i => i.id !== sh.id && i.unit !== 'level' && !ids.includes(i.id));
   const portions = parseNum(ui.f.cookPortions ?? '');
   const grams = parseNum(ui.f.cookGrams ?? '');
   const perPortion = portions > 0 && grams > 0 ? grams / portions : null;
@@ -83,7 +83,7 @@ export function cookSheet(v: V, sh: Sheet) {
       return html`<div class="line" id="ck-${id}">
         <span class="emoji">${it?.emoji ?? '❔'}</span>
         <span class="n">${it?.name ?? 'Unknown'} <span class="muted small">${it ? unitOf(it) : ''}</span></span>
-        ${it ? stepper(ui, String(id), qty, stepOf(it), '', true) : ''}
+        ${it?.unit === 'level' ? html`<span class="small muted">not counted</span>` : it ? stepper(ui, String(id), qty, stepOf(it), '', true) : ''}
         <button class="btn alt icon" data-a="rmLine" data-k="${id}" aria-label="Remove ${it?.name ?? 'ingredient'}">×</button>
       </div>
       ${over ? html`<div class="overdraw-warn compact">⚠️ Only ${fmtNum(avail)} ${it.unit} in stock (will leave ${fmtNum(shown(qty - it.stock))} ${it.unit} owed)</div>` : ''}`;

@@ -1,4 +1,4 @@
-import { clientsClaim } from 'workbox-core';
+import { clientsClaim, setCacheNameDetails } from 'workbox-core';
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 
@@ -28,6 +28,8 @@ interface SwScope {
 }
 
 const sw = self as unknown as SwScope;
+
+setCacheNameDetails({ prefix: 'myfood', suffix: 'v2-level-containers' });
 
 // @ts-expect-error -- injected by workbox-build during injectManifest
 precacheAndRoute(self.__WB_MANIFEST);

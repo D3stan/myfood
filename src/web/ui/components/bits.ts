@@ -1,4 +1,5 @@
 import { daysUntil } from '../../../shared/dates.ts';
+import { levelParts } from '../../../shared/stock.ts';
 import { fmtNum } from '../../../shared/text.ts';
 import type { EventLine, FoodEvent, Item, Kind, State } from '../../../shared/types.ts';
 import type { Ui } from '../../store.ts';
@@ -12,11 +13,21 @@ export const levelName = (n: number): string => (n >= 1 ? 'full' : n >= 0.5 ? 'h
 /** One tap of a stepper. Level items move a quarter at a time. */
 export const stepOf = (it: Item): number => (it.unit === 'level' ? 0.25 : it.step);
 export const unitOf = (it: Item): string => (it.unit === 'level' ? '' : it.unit);
-export const amount = (it: Item | undefined, q: number): string => (it?.unit === 'level' ? levelName(q) : fmtNum(q));
+export const amount = (it: Pick<Item, 'unit'> | undefined, q: number): string => {
+  if (it?.unit !== 'level') return fmtNum(q);
+  const { open, sealed } = levelParts(q);
+  return `${levelName(open)}${sealed > 0 ? ` +${sealed}` : ''}`;
+};
+
+export const levelReadLabel = (it: Pick<Item, 'emoji' | 'name'>, q: number): string => {
+  const { open, sealed } = levelParts(q);
+  return `${it.emoji} ${it.name}: ${levelName(open)}${sealed > 0 ? ` +${sealed}` : ''}`;
+};
 
 /** "🥚 3": what a line says, whatever its sign. */
-export const lineText = (items: Item[], l: EventLine): string => {
+export const lineText = (items: Item[], l: EventLine, kind?: Kind): string => {
   const it = items.find(i => i.id === l.item_id);
+  if (it?.unit === 'level' && l.is_set && kind === 'eat') return levelReadLabel(it, (l.level_sealed_before ?? 0) + l.qty);
   return `${it?.emoji ?? '❔'} ${amount(it, l.is_set ? l.qty : Math.abs(l.qty))}`;
 };
 

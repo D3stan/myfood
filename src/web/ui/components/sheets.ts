@@ -1,6 +1,6 @@
 import { html } from '../../html.ts';
 import { isoDate } from '../../../shared/dates.ts';
-import { eventNutrition, portionCount, shown } from '../../../shared/stock.ts';
+import { eventNutrition, levelParts, portionCount, shown } from '../../../shared/stock.ts';
 import { fmtCost, fmtNum } from '../../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../../shared/types.ts';
 import type { Item, Unit } from '../../../shared/types.ts';
@@ -48,7 +48,10 @@ export const itemToFields = (i: Item): Record<string, string> => {
   };
 };
 
-const level = (n: number) => html`<span class="level" role="img" aria-label="${levelName(n)}">${[1, 2, 3, 4].map(i => html`<i class="${i <= Math.ceil(n * 4) ? 'on' : ''}"></i>`)}</span>`;
+const level = (n: number) => {
+  const { open, sealed } = levelParts(n);
+  return html`<span class="level" role="img" aria-label="${levelName(open)}">${[1, 2, 3, 4].map(i => html`<i class="${i <= Math.ceil(open * 4) ? 'on' : ''}"></i>`)}</span>${sealed ? html` <span class="small muted">+${sealed}</span>` : ''}`;
+};
 
 export function itemSheet(v: V, sh: Sheet) {
   const it = v.st.items.find(i => i.id === sh.id);
@@ -71,7 +74,7 @@ export function itemSheet(v: V, sh: Sheet) {
       : []),
   ];
   return html`<h2 id="sheet-title">${it.emoji} ${it.name}</h2>
-    <p class="stock center">${it.unit === 'level' ? html`${level(n)} ${levelName(n)}`
+    <p class="stock center">${it.unit === 'level' ? html`${level(n)} ${levelName(levelParts(n).open)}`
       : ports != null ? `${fmtNum(ports)} port · ${fmtNum(n)} g` : `${fmtNum(n)} ${it.unit}`}${owed > 0 ? html` <span class="debt-badge">${fmtNum(owed)} owed</span>` : ''}</p>
     <p class="small muted center" style="margin:-2px 0 10px">${metaBits.join(' · ')}</p>
     ${owed > 0 ? html`<p class="debt-note">${fmtNum(owed)} ${it.unit} owed from earlier eats — Set exact amount to clear</p>` : ''}
@@ -80,7 +83,10 @@ export function itemSheet(v: V, sh: Sheet) {
       <button class="${!usePortions ? 'on' : ''}" data-a="portionMode" data-v="0">Grams</button>
     </div>` : ''}
     ${it.unit === 'level'
-      ? html`<div class="row wrap">${([['Full', 1], ['Half', 0.5], ['Low', 0.25], ['Out', 0]] as const).map(([l, x]) => html`<button class="btn alt grow" data-a="level" data-v="${x}">${l}</button>`)}</div>`
+      ? html`<div class="row wrap">${([['Full', 1], ['Half', 0.5], ['Low', 0.25], ['Out', 0]] as const).map(([l, x]) => html`<button class="btn alt grow" data-a="level" data-v="${x}">${l}</button>`)}</div>
+        <div class="row wrap" style="margin-top:12px"><button class="btn alt grow" data-a="pack">+1 bought</button></div>
+        <label class="field" for="f-buyCost">Cost when buying (optional, ${st.currency})</label>
+        <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">`
       : html`${stepper(ui, 'main', rawQ, usePortions ? 0.5 : it.step, usePortions ? 'portion' : it.unit)}
         ${overdraw ? html`<p class="overdraw-warn">⚠️ Only ${fmtNum(n)} ${it.unit} in stock — eating ${fmtNum(eatQty)} ${it.unit} will leave ${fmtNum(shown(eatQty - it.stock))} ${it.unit} owed</p>` : ''}
         <div class="row"><button class="btn grow" data-a="eat">Eat</button><button class="btn alt grow" data-a="add">Add</button></div>
@@ -125,6 +131,7 @@ export function presetEditSheet(v: V, sh: Sheet) {
 export function eventSheet(v: V, sh: Sheet) {
   const { st, ui } = v, e = st.events.find(x => x.cid === sh.id);
   if (!e) return html``;
+  const levelReading = e.kind === 'eat' && e.lines.some(l => l.is_set && st.items.find(i => i.id === l.item_id)?.unit === 'level');
   const nut = e.kind === 'eat' && e.counts_nutrition ? eventNutrition(e, st.items) : null;
   const info = [
     clock(e.at),
@@ -132,7 +139,7 @@ export function eventSheet(v: V, sh: Sheet) {
     ...(nut && (nut.kcal > 0 || nut.protein_g > 0) ? [`${nut.kcal} kcal · ${fmtNum(nut.protein_g)}g P`] : []),
     ...(e.note ? [e.note] : []),
   ];
-  return html`<h2 id="sheet-title">${userOf(st, e)?.emoji ?? '🙂'} ${userOf(st, e)?.name ?? ''} ${VERB[e.kind]}</h2>
+  return html`<h2 id="sheet-title">${userOf(st, e)?.emoji ?? '🙂'} ${userOf(st, e)?.name ?? ''} ${levelReading ? 'set' : VERB[e.kind]}</h2>
     <p class="muted small">${info.join(' · ')}</p>
     ${e.lines.map(l => qLine(v, sh, st.items.find(i => i.id === l.item_id), String(l.item_id)))}
     <div class="row" style="margin-top:16px"><button class="btn alt" data-a="undoEvent">Undo</button><button class="btn right" data-a="saveEvent" ${ui.online ? '' : 'disabled'}>Save changes</button></div>

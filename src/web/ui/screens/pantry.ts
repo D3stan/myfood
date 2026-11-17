@@ -1,6 +1,6 @@
 import { html } from '../../html.ts';
 import { daysUntil } from '../../../shared/dates.ts';
-import { isExpiringSoon, isLow, portionCount, shown } from '../../../shared/stock.ts';
+import { isExpiringSoon, isLow, levelParts, portionCount, shown } from '../../../shared/stock.ts';
 import { fmtNum } from '../../../shared/text.ts';
 import type { FoodEvent, Item, Job, Preset } from '../../../shared/types.ts';
 import { expiryLabel, levelName, ownerOf } from '../components/bits.ts';
@@ -18,7 +18,10 @@ export function heroPreset(presets: Preset[], events: FoodEvent[], now = new Dat
 
 export const shoppingText = (low: Item[]): string => ['Shopping list', ...low.map(i => `- ${i.name}`)].join('\n');
 
-const level = (n: number) => html`<span class="level" role="img" aria-label="${levelName(n)}">${[1, 2, 3, 4].map(i => html`<i class="${i <= Math.ceil(n * 4) ? 'on' : ''}"></i>`)}</span>`;
+const level = (n: number) => {
+  const { open, sealed } = levelParts(n);
+  return html`<span class="level" role="img" aria-label="${levelName(open)}">${[1, 2, 3, 4].map(i => html`<i class="${i <= Math.ceil(open * 4) ? 'on' : ''}"></i>`)}</span>${sealed ? html` <span class="small muted">+${sealed}</span>` : ''}`;
+};
 
 const tags = (v: V, p: Preset) => p.lines.map(l => html`<span>${v.st.items.find(i => i.id === l.item_id)?.emoji ?? '❔'} ${fmtNum(l.qty)}</span>`);
 

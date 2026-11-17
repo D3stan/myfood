@@ -59,7 +59,12 @@ export function history({ st, ui }: V) {
           <button class="ev ${e.kind}" id="ev-${e.cid}" data-a="open" data-s="event" data-id="${e.cid}">
             <span class="who">${userOf(st, e)?.emoji ?? '🙂'}</span>
             <span class="grow">
-              <b>${VERB[e.kind]}</b> ${e.lines.map(l => lineText(st.items, l)).join(', ')}
+              ${e.lines.some(l => e.kind === 'eat' && l.is_set && st.items.find(i => i.id === l.item_id)?.unit === 'level')
+                ? e.lines.map(l => {
+                  const levelReading = l.is_set && st.items.find(i => i.id === l.item_id)?.unit === 'level';
+                  return `${levelReading ? 'set' : 'ate'} ${lineText(st.items, l, e.kind)}`;
+                }).join(', ')
+                : html`<b>${VERB[e.kind]}</b> ${e.lines.map(l => lineText(st.items, l, e.kind)).join(', ')}`}
               ${e.source === 'cook' ? html` <span class="tag">cooked</span>` : ''}
               ${e.cost_cents != null && e.cost_cents > 0 ? html` <span class="tag">${fmtCost(e.cost_cents, st.currency)}</span>` : ''}
               ${e.note ? html`<span class="small muted clip">${e.note}</span>` : ''}

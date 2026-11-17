@@ -32,7 +32,7 @@ export function reviewSheet(v: V, sh: Sheet) {
   const today = isoDate(st.now);
   return html`<h2 id="sheet-title">${isAudit ? 'Fridge audit — review adjustments' : 'Receipt'}</h2>
     <p>${job?.result?.reply ?? ''}</p>
-    ${events.map((e, ei) => html`<h3>${VERB[e.kind]}</h3>${e.lines.map((l, li) => {
+    ${events.map((e, ei) => html`<h3>${e.kind === 'eat' && e.lines.some(l => l.item_id != null && st.items.find(i => i.id === l.item_id)?.unit === 'level') ? 'set' : VERB[e.kind]}</h3>${e.lines.map((l, li) => {
       const k = `${ei}.${li}`, it = l.item_id == null ? undefined : st.items.find(i => i.id === l.item_id);
       const nu = l.new_item, orig = sh.orig?.[ei]?.lines[li];
       const lineUnit = l.unit ?? (it ? unitOf(it) : (nu?.unit ?? ''));
