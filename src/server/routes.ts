@@ -96,7 +96,8 @@ function extractMcpSecret(c: Context): string | null {
     const m = /^Bearer\s+(.+)$/i.exec(authHdr);
     return m?.[1]?.trim() || null;
   }
-  return c.req.header('x-mcp-secret')?.trim() || null;
+  // Path token (/mcp/<secret>) is for clients that can't send headers, e.g. claude.ai custom connectors.
+  return c.req.header('x-mcp-secret')?.trim() || c.req.param('token')?.trim() || null;
 }
 
 function sameSecret(a: string, b: string): boolean {
@@ -458,7 +459,7 @@ export function createApp(deps: Deps): Hono<Env> {
   app.all('/api/*', () => d.fail(404, 'Not found'));
 
   // ---- MCP Streamable HTTP (stateless, authenticated by MCP_SECRET only) ----
-  app.all('/mcp', async c => {
+  app.all('/mcp/:token?', async c => {
     c.header('Cache-Control', 'no-store');
     const secret = deps.mcpSecret?.trim();
     if (!secret) {

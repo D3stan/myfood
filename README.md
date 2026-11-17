@@ -35,9 +35,25 @@ sudo install -o pantry -g pantry -m 600 deploy/myfood-mcp.env.example /etc/myfoo
 sudo systemctl restart myfood.service
 ```
 
-#### Claude (claude.ai / Claude Desktop / Claude Code)
+or with the secret as the last path segment, for clients that can't send headers:
 
-For remote HTTP in Claude Code (`~/.claude.json` or `.mcp.json`) or `claude.ai` custom connector:
+```
+https://food.0xpuddu.com/mcp/<MCP_SECRET>
+```
+
+#### claude.ai (web, Desktop, mobile)
+
+claude.ai custom connectors can't send an `Authorization` header, so use the path-token URL:
+
+1. claude.ai → **Settings → Connectors → Add custom connector**.
+2. Name: `MyFood`. URL: `https://food.0xpuddu.com/mcp/<MCP_SECRET>`. Leave OAuth fields empty → **Add**.
+3. In a chat, open the **+ / tools** menu and enable MyFood.
+
+The connector syncs to Claude Desktop and the mobile apps on the same account. Anyone with the URL has full access: treat it like a password, and rotate `MCP_SECRET` (then re-add the connector) if it leaks.
+
+#### Claude Code
+
+In `~/.claude.json` or `.mcp.json`:
 
 ```json
 {

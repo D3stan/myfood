@@ -188,6 +188,26 @@ test('/mcp auth: 503 when unset, 401 when missing/wrong, 200 on Bearer and x-mcp
   expect(rDel.status).toBe(405);
 });
 
+test('/mcp/<secret> path token authenticates header-less clients (claude.ai connectors)', async () => {
+  const init = (path: string) =>
+    app.request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } },
+      }),
+    });
+  expect((await init(`/mcp/${SECRET}`)).status).toBe(200);
+  expect((await init('/mcp/wrong-secret')).status).toBe(401);
+  expect((await init(`/mcp/${SECRET}/extra`)).status).not.toBe(200);
+  // Disabled server stays closed even with a path token
+  const off = await makeApp(undefined).request(`/mcp/${SECRET}`, { method: 'POST' });
+  expect(off.status).toBe(503);
+});
+
 test('MCP HTTP initialize + tools/list + full item/event/cook/expense/lock lifecycle', async () => {
   const { client, transport } = await connectClient(app);
 
