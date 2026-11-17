@@ -24,6 +24,8 @@ export interface Sheet {
   /** cook: ingredient lines being prepared. */
   ingredients?: { item_id: number; qty: number }[];
   more?: boolean;
+  /** item: the typed "set exact amount" field is open. */
+  exact?: boolean;
   busy?: boolean;
 }
 

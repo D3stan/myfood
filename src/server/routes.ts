@@ -65,11 +65,13 @@ export type AppOpts = Deps;
 
 type Env = { Variables: { uid: number } };
 
-const CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'";
+// wasm-unsafe-eval lets the barcode decoder (zxing WebAssembly) compile; it does not allow JS eval.
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'";
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm',
 };
 const MAX_IMAGE = 8 * 1024 * 1024;
 const MAX_IMAGES = 4;

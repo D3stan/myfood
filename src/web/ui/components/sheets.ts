@@ -54,6 +54,13 @@ const level = (n: number) => {
   return html`<span class="level" role="img" aria-label="${levelName(open)}">${[1, 2, 3, 4].map(i => html`<i class="${i <= Math.ceil(open * 4) ? 'on' : ''}"></i>`)}</span>${sealed ? html` <span class="small muted">+${sealed}</span>` : ''}`;
 };
 
+/** Typed "set exact amount": replaces the stock with what you type. */
+const exactForm = (ui: V['ui'], unit: string, placeholder: string) => html`<form class="row" style="gap:8px;margin-top:10px;align-items:flex-end" data-submit="setExact">
+    <div class="grow"><label class="field" for="f-exact">Exact amount (${unit})</label>
+      <input id="f-exact" type="text" inputmode="decimal" autofocus placeholder="${placeholder}" data-f="exact" value="${ui.f.exact ?? ''}" autocomplete="off"></div>
+    <button class="btn" type="submit">Set</button>
+  </form>`;
+
 export function itemSheet(v: V, sh: Sheet) {
   const it = v.st.items.find(i => i.id === sh.id);
   if (!it) return html``;
@@ -89,16 +96,19 @@ export function itemSheet(v: V, sh: Sheet) {
     </div>` : ''}
     ${it.unit === 'level'
       ? html`<div class="row wrap">${([['Full', 1], ['Half', 0.5], ['Low', 0.25], ['Out', 0]] as const).map(([l, x]) => html`<button class="btn alt grow" data-a="level" data-v="${x}">${l}</button>`)}</div>
-        <div class="row wrap" style="margin-top:12px"><button class="btn alt grow" data-a="pack">+1 bought</button></div>
+        <div class="row wrap" style="margin-top:12px"><button class="btn alt grow" data-a="pack">+1 bought</button>
+          ${sh.exact ? '' : html`<button class="linkbtn grow" data-a="exactOpen">Set exact count</button>`}</div>
         <label class="field" for="f-buyCost">Cost when buying (optional, ${st.currency})</label>
-        <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">`
+        <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">
+        ${sh.exact ? exactForm(ui, 'containers, e.g. 2.5 = 2 sealed + half', 'e.g. 2.5') : ''}`
       : html`${stepper(ui, 'main', rawQ, usePortions ? 0.5 : it.step, usePortions ? 'portion' : it.unit)}
         ${overdraw ? html`<p class="overdraw-warn">⚠️ Only ${fmtNum(n)} ${it.unit} in stock — eating ${fmtNum(eatQty)} ${it.unit} will leave ${fmtNum(shown(eatQty - it.stock))} ${it.unit} owed</p>` : ''}
-        <div class="row"><button class="btn grow" data-a="eat">Eat</button><button class="btn alt grow" data-a="add">Add</button></div>
+        <div class="row"><button class="btn grow" data-a="eat">Eat</button><button class="btn grow" data-a="add">Add</button></div>
         <div class="row wrap" style="margin-top:12px"><button class="btn alt grow" data-a="pack">Add a pack (+${fmtNum(it.pack_size)})</button>
-          <button class="linkbtn grow" data-a="setExact">Set exact amount</button></div>
+          ${sh.exact ? '' : html`<button class="linkbtn grow" data-a="exactOpen">Set exact amount</button>`}</div>
         <label class="field" for="f-buyCost">Cost when buying (optional, ${st.currency})</label>
-        <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">`}
+        <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">
+        ${sh.exact ? exactForm(ui, it.unit, '') : ''}`}
     ${it.is_cooked ? html`<div class="row" style="margin-top:10px"><button class="btn alt grow" data-a="open" data-s="cook" data-id="${it.id}">🍲 Cook another batch</button></div>` : ''}
     <div class="row" style="margin-top:8px"><button class="linkbtn" data-a="more" aria-expanded="${!!sh.more}">Edit item ${sh.more ? '▴' : '▾'}</button></div>
     ${sh.more ? html`${itemFields(ui.f, false)}

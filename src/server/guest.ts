@@ -9,7 +9,7 @@ import { randomInt } from 'node:crypto';
 import { CATEGORIES } from '../shared/types.ts';
 import type { Category, Unit } from '../shared/types.ts';
 import { daysUntil } from '../shared/dates.ts';
-import { shown } from '../shared/stock.ts';
+import { levelLabel, shown } from '../shared/stock.ts';
 import { sha256 } from './auth.ts';
 import { all, getMeta, setMeta } from './db.ts';
 import type { Db } from './db.ts';
@@ -72,7 +72,7 @@ ${error ? `<p class="err" role="alert">${esc(error)}</p>` : ''}<button type="sub
 
 const amount = (stock: number, unit: Unit): string => {
   const n = shown(stock);
-  if (unit === 'level') return n >= 1 ? 'full' : n >= 0.5 ? 'half' : n > 0 ? 'low' : 'out';
+  if (unit === 'level') return levelLabel(n);
   return `${Math.round(n * 100) / 100} ${unit}`;
 };
 

@@ -5,9 +5,9 @@ import { html, htmlToString } from '../src/web/html.ts';
 import { flush } from '../src/web/outbox.ts';
 import { applyOps } from '../src/shared/stock.ts';
 import type { BarcodeLookup, PendingOp, State } from '../src/shared/types.ts';
-import { enqueueEvent, enqueueUndo, newStore, openSheet, qOf, receive, stepQ, store as singletonStore, view } from '../src/web/store.ts';
+import { enqueueEvent, enqueueUndo, newStore, openSheet, qOf, receive, setQ, stepQ, store as singletonStore, view } from '../src/web/store.ts';
 import { actions, findCreatedItem, overdrawWarning, visibleLowItems } from '../src/web/ui/actions.ts';
-import { barcodeToFields, stopScanner } from '../src/web/ui/components/barcode.ts';
+import { barcodeToFields, bcModeOf, bcTotal, stopScanner } from '../src/web/ui/components/barcode.ts';
 import { cookBatchMacros } from '../src/web/ui/components/cook.ts';
 import { itemToFields, macroBasis } from '../src/web/ui/components/sheets.ts';
 import { appHtml, sheetHtml, toastHtml } from '../src/web/ui/render.ts';
@@ -218,15 +218,18 @@ describe('v2 sheets and helpers', () => {
     expect(fields.bcProtein).toBe('1');
     s.ui.barcodeLookup = lkUnmatched;
     s.ui.f = { ...s.ui.f, ...fields, barcodeCode: '5701234567890' };
-    openSheet(s, { t: 'barcode', q: {} });
+    openSheet(s, { t: 'barcode', q: { bc: 1 } }); // the app opens with 1
     const outUnmatched = sheetHtml(s);
-    expect(outUnmatched).toContain('Snap photo instead');
+    expect(outUnmatched).toContain('Photo of the barcode');
+    expect(outUnmatched).toContain('data-c="barcodePhoto"');
+    expect(outUnmatched).toContain('Ask the AI instead');
     expect(outUnmatched).toContain('Create &amp; Add');
     expect(outUnmatched).toContain('Or link to existing item');
 
     s.ui.barcodeLookup = { ...lkUnmatched, item_id: 1 };
     const outMatched = sheetHtml(s);
-    expect(outMatched).toContain('Add pack (+10 pc)');
+    expect(outMatched).toContain('Add 10 pc'); // default: 1 pack of 10
+    expect(outMatched).toContain('Packs (10 pc)');
 
     s.ui.scannerActive = true;
     stopScanner(s);
@@ -303,6 +306,77 @@ describe('v2 sheets and helpers', () => {
     const cookOut = sheetHtml(s);
     expect(cookOut).toContain('overdraw-warn compact');
     expect(cookOut).toContain('Only 200 g in stock');
+  });
+
+  test('barcode quantity: packs, own unit, level containers; switching keeps the amount', async () => {
+    expect(bcTotal(3, 'pack', 'pc', 10)).toBe(30);
+    expect(bcTotal(450, 'unit', 'g', 500)).toBe(450);
+    expect(bcTotal(0.5, 'pack', 'ml', 1000)).toBe(500);
+    expect(bcTotal(2, 'pack', 'level', 7)).toBe(2); // level: always containers
+    expect(bcModeOf({ bcMode: 'unit' }, 'level', 7)).toBe('pack');
+    expect(bcModeOf({ bcMode: 'unit' }, 'pc', 1)).toBe('pack'); // pack of 1: no toggle
+
+    const prevServer = singletonStore.server, prevPending = singletonStore.pending, prevSheet = singletonStore.ui.sheet;
+    const morphSpy = vi.spyOn(Idiomorph, 'morph').mockImplementation(() => []);
+    try {
+      vi.stubGlobal('window', { setTimeout: () => 0, clearTimeout: () => {} });
+      vi.stubGlobal('document', {
+        getElementById: () => ({ classList: { toggle() {} }, setAttribute() {}, scrollTop: 0, querySelector: () => null, focus() {} }),
+        documentElement: { classList: { toggle() {} } }, activeElement: null, querySelector: () => null, title: '',
+      });
+      singletonStore.server = structuredClone(fixture);
+      singletonStore.pending = [];
+      singletonStore.ui.f = { ...singletonStore.ui.f, bcMode: 'pack', buyCost: '' };
+      singletonStore.ui.barcodeLookup = { found: true, code: '5701234567890', item_id: 1, product: null };
+      openSheet(singletonStore, { t: 'barcode', q: { bc: 3 } });
+      const el = (dataset: Record<string, string>) => ({ dataset }) as unknown as HTMLElement;
+      expect(sheetHtml(singletonStore)).toContain('= 30 pc');
+      await actions.bcMode!(el({ v: 'unit', p: '10' }));
+      expect(qOf(singletonStore.ui.sheet!, 'bc')).toBe(30);
+      setQ(singletonStore.ui.sheet!, 'bc', 7); // e.g. typed 7 loose eggs
+      await actions.barcodeAddPack!(el({ id: '1' }));
+      const op = singletonStore.pending[0] as Extract<PendingOp, { type: 'event' }>;
+      expect(op.body).toMatchObject({ kind: 'buy', lines: [{ item_id: 1, qty: 7 }] });
+      singletonStore.pending = [];
+      await new Promise(r => setTimeout(r, 0));
+    } finally {
+      morphSpy.mockRestore();
+      vi.unstubAllGlobals();
+      singletonStore.server = prevServer; singletonStore.pending = prevPending; singletonStore.ui.sheet = prevSheet;
+    }
+  });
+
+  test('item sheet: Eat and Add match, exact amount is typed (level items count containers)', async () => {
+    const out = sheetHtml((() => { const s = fresh(); openSheet(s, { t: 'item', id: 1, q: { main: 1 } }); return s; })());
+    expect(out).toContain('<button class="btn grow" data-a="eat">Eat</button><button class="btn grow" data-a="add">Add</button>');
+    expect(out).toContain('data-a="exactOpen"');
+
+    const prevServer = singletonStore.server, prevPending = singletonStore.pending, prevSheet = singletonStore.ui.sheet;
+    const morphSpy = vi.spyOn(Idiomorph, 'morph').mockImplementation(() => []);
+    try {
+      vi.stubGlobal('window', { setTimeout: () => 0, clearTimeout: () => {} });
+      vi.stubGlobal('document', {
+        getElementById: () => ({ classList: { toggle() {} }, setAttribute() {}, scrollTop: 0, querySelector: () => null, focus() {} }),
+        documentElement: { classList: { toggle() {} } }, activeElement: null, querySelector: () => null, title: '',
+      });
+      singletonStore.server = structuredClone(fixture);
+      singletonStore.pending = [];
+      openSheet(singletonStore, { t: 'item', id: 8, q: {} }); // Salt, level
+      expect(sheetHtml(singletonStore)).toContain('Set exact count');
+      await actions.exactOpen!({ dataset: {} } as unknown as HTMLElement);
+      expect(sheetHtml(singletonStore)).toContain('data-submit="setExact"');
+      singletonStore.ui.f.exact = '2,5';
+      await actions.setExact!({ dataset: {} } as unknown as HTMLElement);
+      const op = singletonStore.pending[0] as Extract<PendingOp, { type: 'event' }>;
+      expect(op.body).toMatchObject({ kind: 'adjust', lines: [{ item_id: 8, qty: 2.5 }] });
+      expect(view(singletonStore)!.items.find(i => i.id === 8)!.stock).toBe(2.5);
+      singletonStore.pending = []; // nothing left for the background flush to send
+      await new Promise(r => setTimeout(r, 0));
+    } finally {
+      morphSpy.mockRestore();
+      vi.unstubAllGlobals();
+      singletonStore.server = prevServer; singletonStore.pending = prevPending; singletonStore.ui.sheet = prevSheet;
+    }
   });
 
   test('eat paths abort when confirm returns false and proceed into negative stock when true', async () => {

@@ -15,6 +15,15 @@ export function levelParts(stock: number): { open: number; sealed: number } {
   return { open: round(stock - sealed), sealed };
 }
 
+/** Name of an open container's level. */
+export const levelName = (n: number): string => (n >= 1 ? 'full' : n >= 0.5 ? 'half' : n > 0 ? 'low' : 'out');
+
+/** "half +1": the open level plus how many sealed spares. */
+export const levelLabel = (stock: number): string => {
+  const { open, sealed } = levelParts(stock);
+  return `${levelName(open)}${sealed > 0 ? ` +${sealed}` : ''}`;
+};
+
 /** Replay one event line. A set line in an eat event changes only the open level container. */
 export function nextStock(prev: number, line: EventLine, kind?: Kind): number {
   return round(line.is_set && kind === 'eat' ? levelParts(prev).sealed + line.qty

@@ -12,8 +12,8 @@ import { isLow, levelParts, shown } from '../../shared/stock.ts';
 import { fmtNum, nameKey, parseCostCents, parseNum } from '../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../shared/types.ts';
 import type { Category, Item, Kind, LineIn, PendingOp, State, Unit } from '../../shared/types.ts';
-import { barcodeToFields, isBarcodeDetectorSupported, startBarcodeScanner, stopScanner } from './components/barcode.ts';
-import { hourToTime, levelReadLabel, timeToHour, unitOf } from './components/bits.ts';
+import { barcodeToFields, bcModeOf, bcTotal, decodeBarcodePhoto, isBarcodeDetectorSupported, startBarcodeScanner, stopScanner } from './components/barcode.ts';
+import { amount, hourToTime, levelReadLabel, timeToHour, unitOf } from './components/bits.ts';
 import { cookBatchMacros } from './components/cook.ts';
 import { itemToFields, macroBasis } from './components/sheets.ts';
 import { render } from './render.ts';
@@ -82,6 +82,8 @@ function logged(kind: Kind, lines: LineIn[], msg: string, extra: { preset_id?: n
 const st = () => view(s)!;
 const item = (id: unknown) => st().items.find(i => i.id === Number(id));
 const sheet = () => s.ui.sheet!;
+const amountText = (unit: Unit, q: number): string =>
+  unit === 'level' ? `${fmtNum(q)} ${q === 1 ? 'container' : 'containers'}` : `${fmtNum(q)} ${unit}`;
 const ate = (it: { name: string; emoji: string; unit: string }, q: number) => it.unit === 'level'
   ? levelReadLabel(it, q)
   : `Ate ${fmtNum(q)} ${it.unit} of ${it.name}`;
@@ -160,6 +162,8 @@ async function runBarcodeLookup(rawCode: string): Promise<void> {
   try {
     const lk = await lookupBarcode(code);
     s.ui.barcodeLookup = lk;
+    if (s.ui.sheet?.t === 'barcode') s.ui.sheet.q.bc = 1;
+    s.ui.f.bcMode = 'pack';
     if (lk.item_id == null) Object.assign(s.ui.f, barcodeToFields(lk));
     else s.ui.f.buyCost = '';
   } catch (e) { fail(e); } finally {
@@ -262,7 +266,7 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
       s.ui.barcodeLookup = null;
       s.ui.barcodeBusy = false;
       s.ui.scannerSupported = isBarcodeDetectorSupported();
-      openSheet(s, { t: 'barcode', q: {} }, { barcodeCode: '', buyCost: '', bcLinkItem: '' });
+      openSheet(s, { t: 'barcode', q: { bc: 1 } }, { barcodeCode: '', buyCost: '', bcLinkItem: '', bcMode: 'pack' });
       if (s.ui.scannerSupported) void startBarcodeScanner(code => runBarcodeLookup(code), () => commit(), s);
     } else if (d.s === 'expense') {
       openSheet(s, { t: 'expense', q: {} }, { expCost: '', expNote: '', expDate: isoDate(v.now) });
@@ -351,9 +355,17 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     s.ui.f.buyCost = '';
     closeSheet(s);
   },
+  exactOpen: () => {
+    const sh = sheet(), it = item(sh.id)!;
+    sh.exact = true;
+    s.ui.f.exact = fmtNum(shown(it.stock));
+  },
   setExact: () => {
-    const sh = sheet(), it = item(sh.id)!, q = resolveItemQty(sh, it, qOf(sh, 'main'));
-    logged('adjust', [{ item_id: it.id, qty: q }], `${it.name} set to ${fmtNum(q)} ${unitOf(it)}`); closeSheet(s);
+    const sh = sheet(), it = item(sh.id)!, raw = parseNum(s.ui.f.exact ?? '');
+    if (Number.isNaN(raw) || raw < 0) return void toast("That's not an amount");
+    const q = Math.round(raw * 1000) / 1000;
+    const label = it.unit === 'level' ? amount(it, q) : `${fmtNum(q)} ${unitOf(it)}`;
+    logged('adjust', [{ item_id: it.id, qty: q }], `${it.name} set to ${label}`); closeSheet(s);
   },
   level: el => {
     const it = item(sheet().id)!, q = Number(el.dataset.v);
@@ -494,18 +506,39 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
   },
   stopScan: () => stopScanner(s),
   barcodeLookup: () => runBarcodeLookup(s.ui.f.barcodeCode ?? ''),
+  barcodePhoto: async el => {
+    const input = el as HTMLInputElement, file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    stopScanner(s);
+    s.ui.barcodeBusy = true; commit();
+    let code: string | undefined;
+    try { code = await decodeBarcodePhoto(file); } finally { s.ui.barcodeBusy = false; }
+    if (!code) return void toast('No barcode found in that photo — try closer, in focus');
+    s.ui.f.barcodeCode = code;
+    await runBarcodeLookup(code);
+  },
   barcodeFallbackPhoto: () => {
     stopScanner(s);
     s.ui.jobMode = 'auto';
     openSheet(s, { t: 'compose', q: {}, mode: 'auto' });
+  },
+  bcMode: el => {
+    const sh = sheet(), next = el.dataset.v === 'unit' ? 'unit' : 'pack', pack = Number(el.dataset.p) || 1;
+    if ((s.ui.f.bcMode === 'unit' ? 'unit' : 'pack') === next) return;
+    const n = qOf(sh, 'bc');
+    setQ(sh, 'bc', next === 'unit' ? n * pack : n / pack); // keep the same amount when switching
+    s.ui.f.bcMode = next;
   },
   barcodeAddPack: el => {
     const it = item(el.dataset.id);
     if (!it) return;
     const cost_cents = parseOptCostCents(s.ui.f.buyCost);
     if (cost_cents === 'invalid') return void toast('Check the cost');
-    const line: LineIn = { item_id: it.id, qty: it.pack_size, ...(cost_cents != null ? { cost_cents } : {}) };
-    logged('buy', [line], `Added a pack of ${it.name}`, cost_cents != null ? { cost_cents } : {});
+    const qty = bcTotal(qOf(sheet(), 'bc'), bcModeOf(s.ui.f, it.unit, it.pack_size), it.unit, it.pack_size);
+    if (!(qty > 0)) return void toast('Pick an amount first');
+    const line: LineIn = { item_id: it.id, qty, ...(cost_cents != null ? { cost_cents } : {}) };
+    logged('buy', [line], `Added ${amountText(it.unit, qty)} of ${it.name}`, cost_cents != null ? { cost_cents } : {});
     s.ui.f.buyCost = '';
     stopScanner(s);
     closeSheet(s);
@@ -532,11 +565,13 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
       fat_per_unit: fatIn == null ? null : Math.round((fatIn / mult) * 1000) / 1000,
       ...(lk?.code ? { barcode: lk.code } : {}),
     };
+    const qty = bcTotal(qOf(sheet(), 'bc'), bcModeOf(f, unit, pack), unit, pack);
+    if (!(qty > 0)) return void toast('Pick an amount first');
     if (!(await mutate('POST', '/api/items', body))) return;
     const created = findCreatedItem(st().items, name, null);
     if (created) {
-      const line: LineIn = { item_id: created.id, qty: created.pack_size, ...(cost_cents != null ? { cost_cents } : {}) };
-      logged('buy', [line], `Added ${name}`, cost_cents != null ? { cost_cents } : {});
+      const line: LineIn = { item_id: created.id, qty, ...(cost_cents != null ? { cost_cents } : {}) };
+      logged('buy', [line], `Added ${amountText(unit, qty)} of ${name}`, cost_cents != null ? { cost_cents } : {});
     } else toast(`Added ${name}`);
     s.ui.f.buyCost = '';
     stopScanner(s);
@@ -548,10 +583,13 @@ export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown
     const cost_cents = parseOptCostCents(f.buyCost);
     if (cost_cents === 'invalid') return void toast('Check the cost');
     if (!navigator.onLine) return void toast("You're offline");
+    // The picker shows the create form's unit/pack; for linking, read its count against the chosen item.
+    const qty = bcTotal(qOf(sheet(), 'bc'), bcModeOf(f, it.unit, it.pack_size), it.unit, it.pack_size);
+    if (!(qty > 0)) return void toast('Pick an amount first');
     try {
       receive(s, await linkBarcode({ code, item_id: it.id }));
       afterState();
-      const line: LineIn = { item_id: it.id, qty: it.pack_size, ...(cost_cents != null ? { cost_cents } : {}) };
+      const line: LineIn = { item_id: it.id, qty, ...(cost_cents != null ? { cost_cents } : {}) };
       logged('buy', [line], `Linked & added ${it.name}`, cost_cents != null ? { cost_cents } : {});
       f.buyCost = '';
       stopScanner(s);

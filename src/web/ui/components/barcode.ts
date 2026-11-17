@@ -2,25 +2,55 @@ import { html } from '../../html.ts';
 import { fmtNum } from '../../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../../shared/types.ts';
 import type { BarcodeLookup, Unit } from '../../../shared/types.ts';
-import { store as defaultStore } from '../../store.ts';
+import { qOf, store as defaultStore } from '../../store.ts';
 import type { Sheet, Store } from '../../store.ts';
 import { unitOf } from './bits.ts';
 import type { V } from './bits.ts';
 import { macroBasis } from './sheets.ts';
+import { stepper } from './stepper.ts';
 
 interface DetectedBarcode { rawValue?: string }
-interface BarcodeDetectorLike { detect(source: HTMLVideoElement): Promise<DetectedBarcode[]> }
-type BarcodeDetectorCtor = new (opts?: { formats?: string[] }) => BarcodeDetectorLike;
+interface BarcodeDetectorLike { detect(source: ImageBitmapSource): Promise<DetectedBarcode[]> }
+type BarcodeDetectorCtor = (new (opts?: { formats?: string[] }) => BarcodeDetectorLike) & { getSupportedFormats?: () => Promise<string[]> };
+
+const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
 
 let activeStream: MediaStream | null = null;
 let scanTimer = 0;
 let scanning = false;
+let detectorP: Promise<BarcodeDetectorLike> | null = null;
 
+/** Native BarcodeDetector when it reads EAN-13, else the zxing-wasm ponyfill (iOS Safari has none). */
+function getDetector(): Promise<BarcodeDetectorLike> {
+  detectorP ??= (async () => {
+    const Native = (globalThis as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+    const nativeFormats = Native ? await Native.getSupportedFormats?.().catch(() => []) ?? [] : [];
+    if (Native && nativeFormats.includes('ean_13')) return new Native({ formats: FORMATS });
+    const [{ BarcodeDetector, setZXingModuleOverrides }, { default: wasmUrl }] = await Promise.all([
+      import('barcode-detector/ponyfill'),
+      import('zxing-wasm/reader/zxing_reader.wasm?url'),
+    ]);
+    // Serve the wasm from our own origin instead of the library's CDN default.
+    setZXingModuleOverrides({ locateFile: (path: string, prefix: string) => (path.endsWith('.wasm') ? wasmUrl : prefix + path) });
+    return new BarcodeDetector({ formats: FORMATS as never });
+  })();
+  detectorP.catch(() => { detectorP = null; });
+  return detectorP;
+}
+
+const firstCode = (hits: DetectedBarcode[]): string | undefined =>
+  hits.map(h => (h.rawValue ?? '').trim()).find(c => /^\d{6,14}$/.test(c));
+
+/** Live scanning needs only a camera; decoding works everywhere thanks to the ponyfill. */
 export function isBarcodeDetectorSupported(): boolean {
-  return typeof globalThis !== 'undefined'
-    && 'BarcodeDetector' in globalThis
-    && typeof navigator !== 'undefined'
-    && typeof navigator.mediaDevices?.getUserMedia === 'function';
+  return typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
+}
+
+/** Reads a barcode from a still photo. Undefined when none is found. */
+export async function decodeBarcodePhoto(file: Blob): Promise<string | undefined> {
+  const detector = await getDetector();
+  const bmp = await createImageBitmap(file);
+  try { return firstCode(await detector.detect(bmp)); } finally { bmp.close(); }
 }
 
 /** Stops any active camera track and detection loop so the camera never leaks. */
@@ -74,16 +104,14 @@ export async function startBarcodeScanner(
     };
     attachVideo();
 
-    const Detector = (globalThis as unknown as { BarcodeDetector: BarcodeDetectorCtor }).BarcodeDetector;
-    const detector = new Detector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+    const detector = await getDetector();
 
     const tick = async () => {
       if (!scanning || s.ui.sheet?.t !== 'barcode') { stopScanner(s); return; }
       const vid = attachVideo();
       if (vid && vid.readyState >= 2) {
         try {
-          const hits = await detector.detect(vid);
-          const code = hits.map(h => (h.rawValue ?? '').trim()).find(c => /^\d{6,14}$/.test(c));
+          const code = firstCode(await detector.detect(vid));
           if (code) {
             stopScanner(s);
             s.ui.f.barcodeCode = code;
@@ -102,6 +130,34 @@ export async function startBarcodeScanner(
     return false;
   }
 }
+
+/** Barcode quantity mode: whole packs, or the item's own unit (g, ml, pc…). Level items always count containers. */
+export type BcMode = 'pack' | 'unit';
+const packOf = (unit: Unit, packSize: number): number => (unit === 'level' ? 1 : packSize);
+export const bcModeOf = (f: Record<string, string>, unit: Unit, packSize: number): BcMode =>
+  f.bcMode === 'unit' && packOf(unit, packSize) !== 1 ? 'unit' : 'pack';
+/** What the add buys, in the item's unit: n packs × pack size, or n units as typed. */
+export const bcTotal = (n: number, mode: BcMode, unit: Unit, packSize: number): number =>
+  Math.round((mode === 'unit' ? n : n * packOf(unit, packSize)) * 1000) / 1000;
+
+function qtyPicker(v: V, sh: Sheet, unit: Unit, packSize: number) {
+  const { ui } = v, pack = packOf(unit, packSize), mode = bcModeOf(ui.f, unit, packSize), n = qOf(sh, 'bc');
+  const u = unit === 'level' ? '' : unit;
+  const step = mode === 'unit' ? (unit === 'g' || unit === 'ml' ? 50 : unit === 'slice' ? 0.5 : 1) : 1;
+  const total = bcTotal(n, mode, unit, packSize);
+  return html`<label class="field">How many</label>
+    ${pack !== 1 ? html`<div class="seg" role="group" aria-label="Count in">
+      <button class="${mode === 'pack' ? 'on' : ''}" data-a="bcMode" data-v="pack" data-p="${pack}">Packs (${fmtNum(pack)} ${u})</button>
+      <button class="${mode === 'unit' ? 'on' : ''}" data-a="bcMode" data-v="unit" data-p="${pack}">${u}</button>
+    </div>` : ''}
+    ${stepper(ui, 'bc', n, step, unit === 'level' ? (n === 1 ? 'container' : 'containers') : mode === 'unit' ? u : n === 1 ? 'pack' : 'packs')}
+    ${mode === 'pack' && pack !== 1 ? html`<p class="small muted center" style="margin:4px 0 0">= ${fmtNum(total)} ${u}</p>` : ''}`;
+}
+
+const addLabel = (n: number, unit: Unit, packSize: number, mode: BcMode): string => {
+  const total = bcTotal(n, mode, unit, packSize);
+  return unit === 'level' ? `Add ${fmtNum(total)} ${total === 1 ? 'container' : 'containers'}` : `Add ${fmtNum(total)} ${unit}`;
+};
 
 /** Pre-fills quick-create fields from an Open Food Facts / cached barcode lookup. */
 export function barcodeToFields(lk: BarcodeLookup): Record<string, string> {
@@ -128,6 +184,9 @@ export function barcodeSheet(v: V, _sh: Sheet) {
   const supported = ui.scannerSupported || isBarcodeDetectorSupported();
   const bcUnit = (UNITS.includes(ui.f.bcUnit as Unit) ? ui.f.bcUnit : 'g') as Unit;
   const { label: macroLabel } = macroBasis(bcUnit);
+  const bcPackRaw = Number((ui.f.bcPack ?? '1').replace(',', '.'));
+  const bcPackN = bcPackRaw > 0 ? bcPackRaw : 1;
+  const linkItem = st.items.find(i => String(i.id) === ui.f.bcLinkItem);
 
   return html`<h2 id="sheet-title">📷 Scan barcode</h2>
     ${supported
@@ -139,13 +198,15 @@ export function barcodeSheet(v: V, _sh: Sheet) {
               : html`<button class="btn alt grow" data-a="startScan">Start camera</button>`}
           </div>
         </div>`
-      : html`<p class="note small">Live barcode scanning isn't supported in this browser — enter the barcode digits or snap a photo instead.</p>`}
+      : html`<p class="note small">No camera access here — take a photo of the barcode or type the digits.</p>`}
     <form class="row" style="gap:8px;margin-top:10px" data-submit="barcodeLookup">
       <input id="f-barcodeCode" type="text" inputmode="numeric" autofocus placeholder="Barcode digits (e.g. 5701234567890)" data-f="barcodeCode" value="${ui.f.barcodeCode ?? ''}" autocomplete="off">
       <button class="btn" type="submit" ${ui.online && !ui.barcodeBusy ? '' : 'disabled'}>${ui.barcodeBusy ? 'Looking…' : 'Look up'}</button>
     </form>
     <div class="row" style="margin-top:8px">
-      <button class="btn alt grow" data-a="barcodeFallbackPhoto">📷 Snap photo instead</button>
+      <label class="btn alt grow center" for="f-bcPhoto">🖼️ Photo of the barcode</label>
+      <input id="f-bcPhoto" type="file" accept="image/*" capture="environment" data-c="barcodePhoto" hidden>
+      <button class="btn alt grow" data-a="barcodeFallbackPhoto">🤖 Ask the AI instead</button>
     </div>
     ${lk ? (matched
       ? html`<div class="card" style="margin-top:14px">
@@ -153,7 +214,8 @@ export function barcodeSheet(v: V, _sh: Sheet) {
             <span class="n"><b>${matched.name}</b> <span class="muted small">pack ${fmtNum(matched.pack_size)} ${unitOf(matched)}</span></span></div>
           <label class="field" for="f-buyCost">Cost (optional, ${st.currency})</label>
           <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">
-          <button class="btn big" style="margin-top:10px" data-a="barcodeAddPack" data-id="${matched.id}">Add pack (+${fmtNum(matched.pack_size)} ${unitOf(matched)})</button>
+          ${qtyPicker(v, _sh, matched.unit, matched.pack_size)}
+          <button class="btn big" style="margin-top:10px" data-a="barcodeAddPack" data-id="${matched.id}" ${qOf(_sh, 'bc') > 0 ? '' : 'disabled'}>${addLabel(qOf(_sh, 'bc'), matched.unit, matched.pack_size, bcModeOf(ui.f, matched.unit, matched.pack_size))}</button>
         </div>`
       : html`<div class="card" style="margin-top:14px">
           ${lk.found && lk.product
@@ -171,7 +233,7 @@ export function barcodeSheet(v: V, _sh: Sheet) {
             <div class="grow"><label class="field" for="f-bcUnit">Unit</label>
               <select id="f-bcUnit" data-f="bcUnit" data-c="rerender">${UNITS.map(u => html`<option value="${u}" ${bcUnit === u ? 'selected' : ''}>${u}</option>`)}</select></div>
             <div class="grow"><label class="field" for="f-bcPack">Pack size</label>
-              <input id="f-bcPack" type="text" inputmode="decimal" data-f="bcPack" value="${ui.f.bcPack ?? '1'}" autocomplete="off"></div>
+              <input id="f-bcPack" type="text" inputmode="decimal" data-f="bcPack" data-c="rerender" value="${ui.f.bcPack ?? '1'}" autocomplete="off"></div>
           </div>
           <div class="row" style="gap:10px">
             <div class="grow"><label class="field" for="f-bcKcal">kcal / ${macroLabel}</label>
@@ -183,14 +245,17 @@ export function barcodeSheet(v: V, _sh: Sheet) {
           </div>
           <label class="field" for="f-buyCost">Cost (optional, ${st.currency})</label>
           <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">
-          <button class="btn big" style="margin-top:10px" data-a="barcodeCreateAdd" ${ui.online ? '' : 'disabled'}>Create &amp; Add</button>
+          ${qtyPicker(v, _sh, bcUnit, bcPackN)}
+          <button class="btn big" style="margin-top:10px" data-a="barcodeCreateAdd" ${ui.online && qOf(_sh, 'bc') > 0 ? '' : 'disabled'}>Create &amp; ${addLabel(qOf(_sh, 'bc'), bcUnit, bcPackN, bcModeOf(ui.f, bcUnit, bcPackN))}</button>
           ${st.items.length ? html`<h3 style="margin-top:14px">Or link to existing item</h3>
             <div class="row" style="gap:8px">
-              <select id="f-bcLinkItem" data-f="bcLinkItem" aria-label="Existing item">
+              <select id="f-bcLinkItem" data-f="bcLinkItem" data-c="rerender" aria-label="Existing item">
                 <option value="">Choose item…</option>
                 ${st.items.map(i => html`<option value="${i.id}" ${ui.f.bcLinkItem === String(i.id) ? 'selected' : ''}>${i.emoji} ${i.name}</option>`)}
               </select>
-              <button class="btn alt" data-a="barcodeLink" ${ui.online ? '' : 'disabled'}>Link &amp; Add</button>
+              <button class="btn alt" data-a="barcodeLink" ${ui.online ? '' : 'disabled'}>${linkItem
+                ? `Link & ${addLabel(qOf(_sh, 'bc'), linkItem.unit, linkItem.pack_size, bcModeOf(ui.f, linkItem.unit, linkItem.pack_size))}`
+                : 'Link & Add'}</button>
             </div>` : ''}
         </div>`)
       : ''}`;
