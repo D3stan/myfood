@@ -1,14 +1,12 @@
-import { addDays, isoDate, isoWeek, weekRange } from '../shared/dates.ts';
-import { computeStock, eventLineNutrition, levelParts, nextStock, shown, toLines } from '../shared/stock.ts';
+import { addDays, isoDate, isoWeek } from '../shared/dates.ts';
+import { computeStock, levelParts, nextStock, shown, toLines } from '../shared/stock.ts';
 import { nameKey } from '../shared/text.ts';
 import { CATEGORIES } from '../shared/types.ts';
 import type {
   CookBody,
-  DailyNutrition,
   EventBody,
   EventLine,
   EventPatch,
-  ExpenseBody,
   ExpenseLock,
   FoodEvent,
   Item,
@@ -16,7 +14,6 @@ import type {
   ItemPatch,
   Job,
   JobMode,
-  LockPeriodBody,
   Me,
   MeBody,
   Preset,
@@ -30,6 +27,7 @@ import type {
 import { listApiTokens } from './auth.ts';
 import type { Db } from './db.ts';
 import { all, bumpRev, get, getMeta, getRev, run, setMeta, transaction } from './db.ts';
+import { dailyNutrition } from './nutrition/repo.ts';
 import { hasPushSubscriptions, notifyLowCrossings } from './push.ts';
 import type { PushSender } from './push.ts';
 
@@ -241,48 +239,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     ),
   );
 
-  const dailyMap = new Map<string, DailyNutrition>();
-  for (const r of all<{
-    at: number;
-    user_id: number;
-    item_id: number;
-    qty: number;
-    is_set: number;
-    kcal: number | null;
-    protein_g: number | null;
-    fat_g: number | null;
-    kcal_per_unit: number | null;
-    protein_per_unit: number | null;
-    fat_per_unit: number | null;
-  }>(
-    db,
-    `SELECT e.at, e.user_id, l.item_id, l.qty, l.is_set, l.kcal, l.protein_g, l.fat_g, i.kcal_per_unit, i.protein_per_unit, i.fat_per_unit
-     FROM event_lines l
-     JOIN events e ON e.cid = l.event_cid
-     JOIN items i ON i.id = l.item_id
-     WHERE e.undone_at IS NULL AND e.kind = 'eat' AND e.counts_nutrition = 1 AND e.at >= ?`,
-    env.now - 30 * DAY_MS,
-  )) {
-    if (r.is_set) continue;
-    const n = eventLineNutrition(
-      { item_id: r.item_id, qty: r.qty, is_set: false, kcal: r.kcal, protein_g: r.protein_g, fat_g: r.fat_g },
-      { kcal_per_unit: r.kcal_per_unit, protein_per_unit: r.protein_per_unit, fat_per_unit: r.fat_per_unit },
-    );
-    if (n.kcal <= 0 && n.protein_g <= 0 && n.fat_g <= 0) continue;
-    const day = isoDate(r.at);
-    const key = `${day}:${r.user_id}`;
-    const cur = dailyMap.get(key);
-    if (cur) {
-      cur.kcal = Math.round(cur.kcal + n.kcal);
-      cur.protein_g = round1(cur.protein_g + n.protein_g);
-      cur.fat_g = round1(cur.fat_g + n.fat_g);
-    } else {
-      dailyMap.set(key, { day, user_id: r.user_id, kcal: Math.round(n.kcal), protein_g: round1(n.protein_g), fat_g: round1(n.fat_g) });
-    }
-  }
-  const daily_nutrition = [...dailyMap.values()].sort((a, b) =>
-    a.day === b.day ? a.user_id - b.user_id : b.day.localeCompare(a.day),
-  );
+  const daily_nutrition = dailyNutrition(db, env.now - 30 * DAY_MS);
 
   const jobs: Job[] = all<{
     id: number;
@@ -834,136 +791,6 @@ export function applyCookBatch(
   };
 
   return transaction(db, exec);
-}
-
-// ---- expenses ----
-
-export function addExpense(db: Db, userId: number, body: ExpenseBody, now: number): void {
-  transaction(db, () => {
-    if (get(db, 'SELECT 1 FROM events WHERE cid = ?', body.cid)) return;
-    const at = Math.min(body.at, now);
-    assertPeriodUnlocked(db, at);
-    insertEvent(db, {
-      cid: body.cid,
-      userId,
-      at,
-      kind: 'buy',
-      source: 'expense',
-      note: body.note || null,
-      presetId: null,
-      jobId: null,
-      costCents: body.cost_cents,
-      countsNutrition: false,
-      lines: [],
-    });
-    bumpRev(db);
-  });
-}
-
-export function lockExpensePeriod(db: Db, userId: number, body: LockPeriodBody, now: number): void {
-  const range = weekRange(body.period);
-  if (!range) fail(400, 'Invalid ISO week');
-  transaction(db, () => {
-    if (get(db, 'SELECT 1 FROM expense_locks WHERE period = ?', body.period)) {
-      fail(409, `Week ${body.period} is already locked`);
-    }
-    const agg = get<{ total_cents: number; event_count: number }>(
-      db,
-      `SELECT COALESCE(SUM(cost_cents), 0) AS total_cents, COUNT(*) AS event_count
-       FROM events WHERE undone_at IS NULL AND cost_cents IS NOT NULL AND at >= ? AND at < ?`,
-      range.start,
-      range.end,
-    )!;
-    run(
-      db,
-      'INSERT INTO expense_locks(period, locked_by, locked_at, total_cents, event_count, note) VALUES (?, ?, ?, ?, ?, ?)',
-      body.period,
-      userId,
-      now,
-      agg.total_cents,
-      agg.event_count,
-      body.note ?? null,
-    );
-    bumpRev(db);
-  });
-}
-
-function csvCell(v: string | number | null | undefined): string {
-  const s = v == null ? '' : String(v);
-  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
-  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
-}
-
-export function exportExpenses(
-  db: Db,
-  opts: { period?: string; format: 'csv' | 'json' },
-): { contentType: string; filename: string; body: string } {
-  const currency = getMeta(db, 'currency') ?? 'kr';
-  let rows: { cid: string; at: number; user_id: number; user_name: string; source: Source; note: string | null; cost_cents: number }[];
-  if (opts.period) {
-    const range = weekRange(opts.period);
-    if (!range) fail(400, 'Invalid ISO week');
-    rows = all(
-      db,
-      `SELECT e.cid, e.at, e.user_id, u.name AS user_name, e.source, e.note, e.cost_cents
-       FROM events e JOIN users u ON u.id = e.user_id
-       WHERE e.undone_at IS NULL AND e.cost_cents IS NOT NULL AND e.at >= ? AND e.at < ?
-       ORDER BY e.at DESC, e.seq DESC`,
-      range.start,
-      range.end,
-    );
-  } else {
-    rows = all(
-      db,
-      `SELECT e.cid, e.at, e.user_id, u.name AS user_name, e.source, e.note, e.cost_cents
-       FROM events e JOIN users u ON u.id = e.user_id
-       WHERE e.undone_at IS NULL AND e.cost_cents IS NOT NULL
-       ORDER BY e.at DESC, e.seq DESC`,
-    );
-  }
-
-  const enriched = rows.map(r => {
-    const items = all<{ name: string }>(
-      db,
-      'SELECT i.name FROM event_lines l JOIN items i ON i.id = l.item_id WHERE l.event_cid = ? ORDER BY l.rowid',
-      r.cid,
-    ).map(x => x.name);
-    return {
-      cid: r.cid,
-      date: isoDate(r.at),
-      week: isoWeek(r.at),
-      at: r.at,
-      user_id: r.user_id,
-      user: r.user_name,
-      source: r.source,
-      note: r.note,
-      items,
-      cost_cents: r.cost_cents,
-      amount: (r.cost_cents / 100).toFixed(2),
-      currency,
-    };
-  });
-
-  const tag = opts.period ?? 'all';
-  if (opts.format === 'json') {
-    return {
-      contentType: 'application/json; charset=utf-8',
-      filename: `myfood-expenses-${tag}.json`,
-      body: JSON.stringify({ period: tag, currency, expenses: enriched }, null, 2),
-    };
-  }
-
-  const header = 'date,week,user,source,note,items,cost_cents,amount,currency';
-  const lines = enriched.map(r =>
-    [r.date, r.week, r.user, r.source, r.note ?? '', r.items.join('; '), r.cost_cents, r.amount, r.currency]
-      .map(csvCell)
-      .join(','),
-  );
-  return {
-    contentType: 'text/csv; charset=utf-8',
-    filename: `myfood-expenses-${tag}.csv`,
-    body: [header, ...lines].join('\n'),
-  };
 }
 
 // ---- items ----

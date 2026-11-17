@@ -3,8 +3,8 @@ import { constants } from 'node:sqlite';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { addDays, daysUntil, ISO_DATE_RE, ISO_WEEK_RE, isoDate, isoWeek } from '../shared/dates.ts';
-import { eventLineNutrition, isExpiringSoon, isLow, portionCount, shown } from '../shared/stock.ts';
+import { addDays, daysUntil, ISO_DATE_RE, isoDate } from '../shared/dates.ts';
+import { isExpiringSoon, isLow, portionCount, shown } from '../shared/stock.ts';
 import { aliasKey, nameKey } from '../shared/text.ts';
 import {
   BarcodeLinkBody,
@@ -14,28 +14,30 @@ import {
   CookIngredientIn,
   EventBody,
   EventPatch,
-  ExpenseBody,
   ItemBody,
   ItemPatch,
   Kind,
   LineIn,
-  LockPeriodBody,
   MeBody,
   PresetBody,
   SOURCES,
   SettingsBody,
   Unit,
 } from '../shared/types.ts';
-import type { DailyNutrition, FoodEvent, Item, Preset, Source, User } from '../shared/types.ts';
+import type { FoodEvent, Item, Preset, Source, User } from '../shared/types.ts';
 import { defaultBarcodeLookup, linkBarcode, resolveBarcode } from './barcodes.ts';
 import type { BarcodeLookupFn } from './barcodes.ts';
 import { all, bumpRev, get, getRev, getMeta, run, transaction } from './db.ts';
 import type { Db } from './db.ts';
 import * as d from './domain.ts';
+import { registerNutritionTools } from './nutrition/mcp.ts';
+import { registerSpendTools } from './spend/mcp.ts';
+import {
+  DESTRUCTIVE_ANNOTATIONS, IDEMPOTENT_WRITE_ANNOTATIONS, READ_ANNOTATIONS, WRITE_ANNOTATIONS,
+  errMessage, errorResult, okResult, resolveUserId, runTool,
+} from './mcp-kit.ts';
 
-const DAY_MS = 86_400_000;
 const MAX_SQL_ROWS = 200;
-const round1 = (n: number): number => Math.round(n * 10) / 10;
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 export interface MyFoodMcpOptions {
@@ -101,71 +103,10 @@ interface EventLineRow {
   fat_g: number | null;
 }
 
-const READ_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: false,
-};
-
-const WRITE_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: false,
-  openWorldHint: false,
-};
-
-const IDEMPOTENT_WRITE_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: false,
-};
-
-const DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
-  readOnlyHint: false,
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: false,
-};
-
-function okResult(summary: string, data: Record<string, unknown>) {
-  return {
-    content: [
-      { type: 'text' as const, text: summary },
-      { type: 'text' as const, text: JSON.stringify(data, null, 2) },
-    ],
-    structuredContent: data,
-  };
-}
-
 const csvCell = (value: unknown): string => {
   const text = value == null ? '' : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 };
-
-function errorResult(message: string) {
-  return {
-    content: [{ type: 'text' as const, text: message }],
-    isError: true as const,
-  };
-}
-
-// Zod's own .message is a JSON dump of issues; flatten it like routes.ts parse() does.
-function errMessage(err: unknown): string {
-  if (err instanceof z.ZodError) {
-    return err.issues.map(i => (i.path.length ? `${i.path.join('.')}: ` : '') + i.message).join('; ');
-  }
-  return (err instanceof Error ? err.message : String(err)).replace(/\.$/, '');
-}
-
-async function runTool(fn: () => ReturnType<typeof okResult> | Promise<ReturnType<typeof okResult>>) {
-  try {
-    return await fn();
-  } catch (err) {
-    return errorResult(errMessage(err));
-  }
-}
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
   const out: Partial<T> = {};
@@ -173,22 +114,6 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
     if (obj[key] !== undefined) out[key] = obj[key];
   }
   return out;
-}
-
-function resolveUserId(db: Db, requested?: number, defaultUserId?: number): number {
-  const target = requested ?? defaultUserId;
-  if (target !== undefined) {
-    const u = get<{ id: number }>(db, 'SELECT id FROM users WHERE id = ?', target);
-    if (!u) d.fail(400, `Unknown user_id: ${target}`);
-    return u.id;
-  }
-  const users = all<{ id: number; name: string }>(db, 'SELECT id, name FROM users ORDER BY id');
-  if (users.length === 0) d.fail(400, 'No users exist in the database');
-  if (users.length === 1) return users[0]!.id;
-  d.fail(
-    400,
-    `Multiple household users exist (${users.map(u => `${u.id}: ${u.name}`).join(', ')}); pass user_id explicitly`,
-  );
 }
 
 function resolveReadUserId(db: Db, requested?: number, defaultUserId?: number): number | null {
@@ -856,143 +781,6 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
   );
 
   server.registerTool(
-    'list_expenses',
-    {
-      title: 'List Expenses & Weekly Locks',
-      description: 'List expenses (optionally for an ISO week YYYY-Www) including lock status and optional CSV export.',
-      inputSchema: {
-        period: z.string().regex(ISO_WEEK_RE, 'Expected YYYY-Www').optional().describe('Optional ISO week (YYYY-Www)'),
-        format: z.enum(['json', 'csv']).optional().describe('Export format: json (default) or csv'),
-      },
-      annotations: READ_ANNOTATIONS,
-    },
-    ({ period, format }) => runTool(() => {
-      const fmt = format ?? 'json';
-      const out = d.exportExpenses(db, { period, format: fmt });
-      const locks = period
-        ? all<{ period: string; locked_by: number; locked_at: number; total_cents: number; event_count: number; note: string | null }>(
-            db,
-            'SELECT period, locked_by, locked_at, total_cents, event_count, note FROM expense_locks WHERE period = ?',
-            period,
-          ).map(l => ({ ...l }))
-        : all<{ period: string; locked_by: number; locked_at: number; total_cents: number; event_count: number; note: string | null }>(
-            db,
-            'SELECT period, locked_by, locked_at, total_cents, event_count, note FROM expense_locks ORDER BY period DESC',
-          ).map(l => ({ ...l }));
-      const is_locked = period ? locks.length > 0 : null;
-
-      if (fmt === 'csv') {
-        const currency = getMeta(db, 'currency') ?? 'kr';
-        return okResult(`Exported CSV for ${period ?? 'all weeks'}.`, {
-          period: period ?? 'all',
-          currency,
-          is_locked,
-          locks,
-          filename: out.filename,
-          csv: out.body,
-        });
-      }
-
-      const parsed = JSON.parse(out.body) as {
-        period: string;
-        currency: string;
-        expenses: { cost_cents: number }[];
-      };
-      const total_cents = parsed.expenses.reduce((sum, e) => sum + e.cost_cents, 0);
-      return okResult(
-        `Found ${parsed.expenses.length} expense(s) totaling ${total_cents} minor units (${parsed.currency}).`,
-        {
-          period: parsed.period,
-          currency: parsed.currency,
-          is_locked,
-          locks,
-          total_cents,
-          event_count: parsed.expenses.length,
-          expenses: parsed.expenses,
-        },
-      );
-    }),
-  );
-
-  server.registerTool(
-    'get_daily_nutrition',
-    {
-      title: 'Get Daily Nutrition',
-      description: 'Aggregate daily eaten kcal, protein_g and fat_g totals (excluding raw cooking ingredient consumption) over the past N days.',
-      inputSchema: {
-        days: z.number().int().min(1).max(365).optional().describe('Lookback window in days (default 14, max 365)'),
-        user_id: z.number().int().positive().optional().describe('Optional user ID filter'),
-      },
-      annotations: READ_ANNOTATIONS,
-    },
-    ({ days, user_id }) => runTool(() => {
-      if (user_id !== undefined && !get(db, 'SELECT 1 FROM users WHERE id = ?', user_id)) {
-        d.fail(400, `Unknown user_id: ${user_id}`);
-      }
-      const lookback = days ?? 14;
-      const cutoff = now() - lookback * DAY_MS;
-      const users = new Map(all<User>(db, 'SELECT id, name, emoji FROM users').map(u => [u.id, u.name]));
-      const rows = all<{
-        at: number;
-        user_id: number;
-        item_id: number;
-        qty: number;
-        is_set: number;
-        kcal: number | null;
-        protein_g: number | null;
-        fat_g: number | null;
-        kcal_per_unit: number | null;
-        protein_per_unit: number | null;
-        fat_per_unit: number | null;
-      }>(
-        db,
-        `SELECT e.at, e.user_id, l.item_id, l.qty, l.is_set, l.kcal, l.protein_g, l.fat_g, i.kcal_per_unit, i.protein_per_unit, i.fat_per_unit
-         FROM event_lines l
-         JOIN events e ON e.cid = l.event_cid
-         JOIN items i ON i.id = l.item_id
-         WHERE e.undone_at IS NULL AND e.kind = 'eat' AND e.counts_nutrition = 1 AND e.at >= ?
-           ${user_id !== undefined ? 'AND e.user_id = ?' : ''}`,
-        ...(user_id !== undefined ? [cutoff, user_id] : [cutoff]),
-      );
-
-      const dailyMap = new Map<string, DailyNutrition & { user_name?: string }>();
-      for (const r of rows) {
-        if (r.is_set) continue;
-        const n = eventLineNutrition(
-          { item_id: r.item_id, qty: r.qty, is_set: false, kcal: r.kcal, protein_g: r.protein_g, fat_g: r.fat_g },
-          { kcal_per_unit: r.kcal_per_unit, protein_per_unit: r.protein_per_unit, fat_per_unit: r.fat_per_unit },
-        );
-        if (n.kcal <= 0 && n.protein_g <= 0 && n.fat_g <= 0) continue;
-        const day = isoDate(r.at);
-        const key = `${day}:${r.user_id}`;
-        const cur = dailyMap.get(key);
-        if (cur) {
-          cur.kcal = Math.round(cur.kcal + n.kcal);
-          cur.protein_g = round1(cur.protein_g + n.protein_g);
-          cur.fat_g = round1(cur.fat_g + n.fat_g);
-        } else {
-          dailyMap.set(key, {
-            day,
-            user_id: r.user_id,
-            user_name: users.get(r.user_id),
-            kcal: Math.round(n.kcal),
-            protein_g: round1(n.protein_g),
-            fat_g: round1(n.fat_g),
-          });
-        }
-      }
-      const entries = [...dailyMap.values()].sort((a, b) =>
-        a.day === b.day ? a.user_id - b.user_id : b.day.localeCompare(a.day),
-      );
-      return okResult(`Returned ${entries.length} daily nutrition entry(ies) over ${lookback} day(s).`, {
-        days: lookback,
-        user_id: user_id ?? null,
-        entries,
-      });
-    }),
-  );
-
-  server.registerTool(
     'query_sql',
     {
       title: 'Run Read-Only SQL Query',
@@ -1458,76 +1246,6 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
   );
 
   server.registerTool(
-    'add_expense',
-    {
-      title: 'Add Standalone Expense',
-      description: 'Add a standalone grocery/food expense event without changing pantry stock (respects weekly locks).',
-      inputSchema: {
-        user_id: z.number().int().positive().optional().describe('User ID paying (optional when household has 1 user)'),
-        cost_cents: ExpenseBody.shape.cost_cents.describe('Expense amount in minor currency units (> 0)'),
-        note: ExpenseBody.shape.note.describe('Optional expense note'),
-        at: z.number().int().positive().optional().describe('Optional unix ms timestamp (default now)'),
-        cid: ExpenseBody.shape.cid.optional().describe('Optional idempotency cid'),
-      },
-      annotations: WRITE_ANNOTATIONS,
-    },
-    (args) => runTool(() => {
-      const nowMs = now();
-      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId);
-      const cid = args.cid ?? `mcp-exp-${randomUUID()}`;
-      const body = ExpenseBody.parse({
-        cid,
-        at: args.at ?? nowMs,
-        cost_cents: args.cost_cents,
-        note: args.note ?? null,
-      });
-      d.addExpense(db, uid, body, nowMs);
-      const storedAt = Math.min(body.at, nowMs);
-      return okResult(`Recorded expense ${cid} (${body.cost_cents} minor units, ${isoWeek(storedAt)}).`, {
-        cid,
-        user_id: uid,
-        at: storedAt,
-        period: isoWeek(storedAt),
-        cost_cents: body.cost_cents,
-        note: body.note ?? null,
-        rev: getRev(db),
-      });
-    }),
-  );
-
-  server.registerTool(
-    'lock_expense_week',
-    {
-      title: 'Lock Expense Week',
-      description: 'Freeze an ISO week (YYYY-Www) so no cost events in that week can be added, edited, or undone.',
-      inputSchema: {
-        period: LockPeriodBody.shape.period.describe('ISO week YYYY-Www (e.g. 2026-W46)'),
-        user_id: z.number().int().positive().optional().describe('User ID locking the week (optional when household has 1 user)'),
-        note: LockPeriodBody.shape.note.describe('Optional settlement note'),
-      },
-      annotations: DESTRUCTIVE_ANNOTATIONS,
-    },
-    (args) => runTool(() => {
-      const nowMs = now();
-      const uid = resolveUserId(db, args.user_id, opts?.defaultUserId);
-      const body = LockPeriodBody.parse({ period: args.period, note: args.note ?? null });
-      d.lockExpensePeriod(db, uid, body, nowMs);
-      const lock = get<{
-        period: string;
-        locked_by: number;
-        locked_at: number;
-        total_cents: number;
-        event_count: number;
-        note: string | null;
-      }>(db, 'SELECT period, locked_by, locked_at, total_cents, event_count, note FROM expense_locks WHERE period = ?', body.period)!;
-      return okResult(
-        `Locked week ${lock.period} (${lock.event_count} events, total ${lock.total_cents} minor units).`,
-        { lock: { ...lock }, rev: getRev(db) },
-      );
-    }),
-  );
-
-  server.registerTool(
     'lookup_barcode',
     {
       title: 'Lookup Barcode',
@@ -1687,6 +1405,10 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       });
     }),
   );
+
+  const ctx = { db, now, defaultUserId: opts?.defaultUserId };
+  registerNutritionTools(server, ctx);
+  registerSpendTools(server, ctx);
 
   return server;
 }

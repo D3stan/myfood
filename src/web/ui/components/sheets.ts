@@ -1,6 +1,7 @@
 import { html } from '../../html.ts';
 import { isoDate } from '../../../shared/dates.ts';
-import { eventNutrition, levelParts, portionCount, shown } from '../../../shared/stock.ts';
+import { eventNutrition } from '../../../shared/nutrition.ts';
+import { levelParts, portionCount, shown } from '../../../shared/stock.ts';
 import { fmtCost, fmtNum } from '../../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../../shared/types.ts';
 import type { Item, Unit } from '../../../shared/types.ts';
