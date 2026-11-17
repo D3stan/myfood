@@ -73,7 +73,7 @@ ALTER TABLE users        ADD COLUMN goal_kcal REAL;      -- NULL = no goal
 ALTER TABLE users        ADD COLUMN goal_protein_g REAL;
 ALTER TABLE users        ADD COLUMN goal_fat_g REAL;
 ALTER TABLE users        ADD COLUMN goal_carbs_g REAL;
-ALTER TABLE items        ADD COLUMN cost_per_unit_cents REAL;  -- last known price per item unit, NULL = unknown
+ALTER TABLE items        ADD COLUMN cost_per_unit_cents REAL;  -- (user_version 4) last known price per item unit, NULL = unknown
 ALTER TABLE event_lines  ADD COLUMN value_cents INTEGER;       -- eat lines: snapshot of qty × item price
 ```
 All via the existing `addCol` helper in `db.ts:migrate()`.
