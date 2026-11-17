@@ -19,7 +19,7 @@ const rows: [string, string][] = [['profile', 'Profile'], ['household', 'Househo
 
 function settings() {
   return html`
-    ${rows.map(([p, label]) => html`<button class="btn alt" style="display:flex;width:100%;margin:8px 0;justify-content:space-between" data-a="go" data-p="${p}"><span>${label}</span><span aria-hidden="true">›</span></button>`)}
+    ${rows.map(([p, label]) => html`<button id="go-${p}" class="btn alt" style="display:flex;width:100%;margin:8px 0;justify-content:space-between" data-a="go" data-p="${p}"><span>${label}</span><span aria-hidden="true">›</span></button>`)}
     <div class="row" style="margin-top:20px"><button class="linkbtn" data-a="logout">Sign out</button><span class="small muted right">build ${__BUILD__}</span></div>
   `;
 }

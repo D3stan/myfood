@@ -18,7 +18,7 @@ import { spend } from './spend/screen.ts';
 
 const page = (v: V, key: string): Html => {
   const p = PAGES[key];
-  return html`<div class="row" style="align-items:center;gap:8px"><button class="linkbtn" data-a="back">‹ Back</button><h1 class="grow" style="margin:0">${p?.title ?? ''}</h1></div>${p?.render(v)}`;
+  return html`<div class="row" style="align-items:center;gap:8px"><button id="page-back" class="linkbtn" data-a="back">‹ Back</button><h1 class="grow" style="margin:0">${p?.title ?? ''}</h1></div>${p?.render(v)}`;
 };
 
 // Pure: state in, HTML string out (so tests need no DOM).
