@@ -19,7 +19,7 @@ const base = (
 ): Item => ({
   id, name, emoji, category, unit, step, pack_size, low_at, stock,
   owner_id: null, is_cooked: false, portion_g: null, expires_at: null,
-  shelf_life_days: null, kcal_per_unit: null, protein_per_unit: null, fat_per_unit: null, carbs_per_unit: null,
+  shelf_life_days: null, kcal_per_unit: null, protein_per_unit: null, fat_per_unit: null, carbs_per_unit: null, cost_per_unit_cents: null,
   ...extra,
 });
 

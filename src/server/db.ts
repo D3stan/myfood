@@ -155,4 +155,12 @@ export function migrate(db: Db): void {
       db.exec('PRAGMA user_version = 3');
     });
   }
+
+  if (version < 4) {
+    transaction(db, () => {
+      addCol(db, 'items', 'cost_per_unit_cents', 'REAL');
+      addCol(db, 'event_lines', 'value_cents', 'INTEGER');
+      db.exec('PRAGMA user_version = 4');
+    });
+  }
 }

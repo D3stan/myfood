@@ -33,6 +33,7 @@ export const itemFields = (f: Record<string, string>, isNew: boolean) => {
     ${field(f, 'step', 'One tap changes by', true)}${field(f, 'pack', 'Units in a pack', true)}
     ${field(f, 'low', 'Running low at (empty = only when out)', true)}
     ${field(f, 'itemKcal', `Calories (kcal / ${label})`, true)}${field(f, 'itemProtein', `Protein (g / ${label})`, true)}${field(f, 'itemFat', `Fat (g / ${label})`, true)}${field(f, 'itemCarbs', `Carbs (g / ${label})`, true)}
+    ${field(f, 'itemPrice', `Price (per ${label}, empty = unknown)`, true)}
     ${isNew ? field(f, 'start', 'How much is there now? (optional)', true) : ''}`;
 };
 
@@ -47,6 +48,7 @@ export const itemToFields = (i: Item): Record<string, string> => {
     itemProtein: i.protein_per_unit == null ? '' : fmtNum(i.protein_per_unit * mult),
     itemFat: i.fat_per_unit == null ? '' : fmtNum(i.fat_per_unit * mult),
     itemCarbs: i.carbs_per_unit == null ? '' : fmtNum(i.carbs_per_unit * mult),
+    itemPrice: i.cost_per_unit_cents == null ? '' : fmtCost(i.cost_per_unit_cents * mult, ''),
     buyCost: '',
   };
 };
@@ -87,6 +89,7 @@ export function itemSheet(v: V, sh: Sheet) {
           it.carbs_per_unit != null ? `${fmtNum(it.carbs_per_unit * mult)}g C` : '',
         ].filter(Boolean).join(' · ')} / ${label}`]
       : []),
+    ...(it.cost_per_unit_cents != null ? [`${fmtCost(it.cost_per_unit_cents * mult, st.currency)} / ${label}`] : []),
   ];
   return html`<h2 id="sheet-title">${it.emoji} ${it.name}</h2>
     <p class="stock center">${it.unit === 'level' ? html`${level(n)} ${levelName(levelParts(n).open)}`

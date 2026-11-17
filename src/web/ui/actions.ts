@@ -226,7 +226,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
     stopScanner(s);
     openSheet(s, { t: 'itemForm', q: {} }, {
       name: '', emoji: '🥫', category: 'pantry', unit: 'pc', step: '1', pack: '1',
-      low: '', start: '', itemOwner: 'shared', itemExpiry: '', itemKcal: '', itemProtein: '', itemFat: '', itemCarbs: '',
+      low: '', start: '', itemOwner: 'shared', itemExpiry: '', itemKcal: '', itemProtein: '', itemFat: '', itemCarbs: '', itemPrice: '',
     });
   },
   openAudit: () => {
@@ -327,9 +327,10 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
     const step = parseNum(f.step ?? ''), pack = parseNum(f.pack ?? '');
     const low = parseOptNum(f.low), start = (f.start ?? '').trim() ? parseNum(f.start!) : 0;
     const kcalIn = parseOptNum(f.itemKcal), proteinIn = parseOptNum(f.itemProtein), fatIn = parseOptNum(f.itemFat), carbsIn = parseOptNum(f.itemCarbs);
+    const priceIn = parseOptCostCents(f.itemPrice);
     const exp = (f.itemExpiry ?? '').trim();
     if (!f.name?.trim() || !(step > 0) || !(pack > 0) || low === 'invalid' || Number.isNaN(start)
-      || kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || carbsIn === 'invalid' || (exp && !ISO_DATE_RE.test(exp))) {
+      || kcalIn === 'invalid' || proteinIn === 'invalid' || fatIn === 'invalid' || carbsIn === 'invalid' || priceIn === 'invalid' || (exp && !ISO_DATE_RE.test(exp))) {
       return void toast('Check the name and the numbers');
     }
     const name = f.name.trim();
@@ -345,6 +346,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
       protein_per_unit: proteinIn == null ? null : Math.round((proteinIn / mult) * 1000) / 1000,
       fat_per_unit: fatIn == null ? null : Math.round((fatIn / mult) * 1000) / 1000,
       carbs_per_unit: carbsIn == null ? null : Math.round((carbsIn / mult) * 1000) / 1000,
+      cost_per_unit_cents: priceIn == null ? null : Math.round((priceIn / mult) * 1000) / 1000,
     };
     if (!(await mutate(isNew ? 'POST' : 'PATCH', isNew ? '/api/items' : `/api/items/${sh.id}`, body))) return;
     const made = isNew && start > 0 ? findCreatedItem(st().items, name, body.owner_id) : undefined;

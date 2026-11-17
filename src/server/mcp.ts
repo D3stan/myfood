@@ -67,6 +67,7 @@ interface ItemRowFull {
   protein_per_unit: number | null;
   fat_per_unit: number | null;
   carbs_per_unit: number | null;
+  cost_per_unit_cents: number | null;
   archived_at: number | null;
   created_at: number;
 }
@@ -174,6 +175,7 @@ function toHydratedItem(
     protein_per_unit: row.protein_per_unit,
     fat_per_unit: row.fat_per_unit,
     carbs_per_unit: row.carbs_per_unit,
+    cost_per_unit_cents: row.cost_per_unit_cents,
   };
   if (recipe) item.recipe = recipe;
   if (includeArchived) item.archived_at = row.archived_at;
@@ -188,7 +190,7 @@ function loadHydratedItems(db: Db, nowMs: number, includeArchived = false): Hydr
     db,
     `SELECT id, name, name_key, emoji, category, unit, step, pack_size, low_at,
             owner_id, is_cooked, portion_g, expires_at, shelf_life_days,
-            kcal_per_unit, protein_per_unit, fat_per_unit, carbs_per_unit, archived_at, created_at
+            kcal_per_unit, protein_per_unit, fat_per_unit, carbs_per_unit, cost_per_unit_cents, archived_at, created_at
      FROM items ${where}`,
   )
     .map(r => toHydratedItem(r, stockMap, recipes, nowMs, includeArchived))
@@ -201,7 +203,7 @@ function getHydratedItemById(db: Db, itemId: number, nowMs: number, includeArchi
     db,
     `SELECT id, name, name_key, emoji, category, unit, step, pack_size, low_at,
             owner_id, is_cooked, portion_g, expires_at, shelf_life_days,
-            kcal_per_unit, protein_per_unit, fat_per_unit, carbs_per_unit, archived_at, created_at
+            kcal_per_unit, protein_per_unit, fat_per_unit, carbs_per_unit, cost_per_unit_cents, archived_at, created_at
      FROM items WHERE ${where}`,
     itemId,
   );
@@ -825,6 +827,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     protein_per_unit: ItemBody.shape.protein_per_unit.describe('Protein (g) per 1 unit'),
     fat_per_unit: ItemBody.shape.fat_per_unit.describe('Fat (g) per 1 unit'),
     carbs_per_unit: ItemBody.shape.carbs_per_unit.describe('Carbs (g) per 1 unit'),
+    cost_per_unit_cents: ItemBody.shape.cost_per_unit_cents.describe('Price per 1 unit in minor currency units (also learned from priced buys)'),
     barcode: ItemBody.shape.barcode.describe('Optional 6-14 digit barcode to link'),
   };
   const CreateItemArgs = z.object(createItemShape);
@@ -847,6 +850,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     protein_per_unit: ItemPatch.shape.protein_per_unit.describe('Updated protein_per_unit'),
     fat_per_unit: ItemPatch.shape.fat_per_unit.describe('Updated fat_per_unit'),
     carbs_per_unit: ItemPatch.shape.carbs_per_unit.describe('Updated carbs_per_unit'),
+    cost_per_unit_cents: ItemPatch.shape.cost_per_unit_cents.describe('Updated price per 1 unit in minor currency units (or null)'),
     barcode: ItemPatch.shape.barcode.describe('Optional 6-14 digit barcode to link'),
   };
   const UpdateItemArgs = z.object(updateItemShape);

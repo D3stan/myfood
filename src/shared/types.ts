@@ -179,6 +179,8 @@ export interface Item {
   protein_per_unit: number | null;
   fat_per_unit: number | null;
   carbs_per_unit: number | null;
+  /** Last known price per 1 item.unit in minor currency units; null = unknown. */
+  cost_per_unit_cents: number | null;
   /** Last saved ingredients for a cooked meal item. */
   recipe?: { item_id: number; qty: number }[];
 }
@@ -196,6 +198,8 @@ export interface EventLine {
   protein_g?: number | null;
   fat_g?: number | null;
   carbs_g?: number | null;
+  /** Eat lines: value consumed (qty x item price when eaten), minor units. Not money paid. */
+  value_cents?: number | null;
 }
 
 export interface FoodEvent {
@@ -377,6 +381,7 @@ export const ItemBody = z.object({
   protein_per_unit: amount.nullish(),
   fat_per_unit: amount.nullish(),
   carbs_per_unit: amount.nullish(),
+  cost_per_unit_cents: amount.nullish(),
   barcode: z.string().trim().regex(/^\d{6,14}$/).nullish(),
 });
 export type ItemBody = z.infer<typeof ItemBody>;

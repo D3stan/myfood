@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS items (
   protein_per_unit REAL,
   fat_per_unit REAL,
   carbs_per_unit REAL,
+  cost_per_unit_cents REAL,         -- last known price per 1 unit; NULL = unknown
   archived_at INTEGER,
   created_at INTEGER NOT NULL
 );
@@ -80,7 +81,8 @@ CREATE TABLE IF NOT EXISTS event_lines (
   kcal REAL,
   protein_g REAL,
   fat_g REAL,
-  carbs_g REAL
+  carbs_g REAL,
+  value_cents INTEGER               -- eat lines: qty x item price at the time (not money paid)
 );
 CREATE INDEX IF NOT EXISTS event_lines_event ON event_lines(event_cid);
 

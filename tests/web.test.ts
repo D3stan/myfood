@@ -450,6 +450,37 @@ describe('v2 sheets and helpers', () => {
   });
 });
 
+describe('item price field', () => {
+  test('per-unit price shows per macro basis, empty = unknown, and saves back as per-unit cents', async () => {
+    const beef = { ...fixture.items.find(i => i.id === 4)!, cost_per_unit_cents: 0.8 }; // g item: 0.8 cents/g
+    expect(itemToFields(beef).itemPrice).toBe('0.80');
+    expect(itemToFields({ ...beef, unit: 'pc', cost_per_unit_cents: 2495 }).itemPrice).toBe('24.95');
+    expect(itemToFields({ ...beef, cost_per_unit_cents: null }).itemPrice).toBe('');
+
+    let sent: Record<string, unknown> | undefined;
+    vi.stubGlobal('navigator', { onLine: true });
+    vi.stubGlobal('window', { setTimeout: () => 0, clearTimeout: () => {} });
+    vi.stubGlobal('document', { getElementById: () => null, documentElement: { classList: { toggle() {} } }, activeElement: null, querySelector: () => null, title: '' });
+    vi.stubGlobal('fetch', async (_p: string, init: RequestInit) => { sent = JSON.parse(String(init.body)); return new Response(JSON.stringify(fixture)); });
+    const morph = vi.spyOn(Idiomorph, 'morph').mockImplementation(() => []);
+    const prevServer = singletonStore.server, prevSheet = singletonStore.ui.sheet;
+    try {
+      singletonStore.server = structuredClone(fixture);
+      openSheet(singletonStore, { t: 'item', id: 4, q: { main: 1 } }, itemToFields(beef));
+      await actions.saveItem!({ dataset: {} } as unknown as HTMLElement);
+      expect(sent!.cost_per_unit_cents).toBe(0.8);
+      openSheet(singletonStore, { t: 'item', id: 4, q: { main: 1 } }, { ...itemToFields(beef), itemPrice: '' });
+      await actions.saveItem!({ dataset: {} } as unknown as HTMLElement);
+      expect(sent!.cost_per_unit_cents).toBeNull();
+    } finally {
+      morph.mockRestore();
+      vi.unstubAllGlobals();
+      singletonStore.server = prevServer;
+      singletonStore.ui.sheet = prevSheet;
+    }
+  });
+});
+
 describe('render smoke', () => {
   const evil = '<img src=x onerror=alert(1)>';
   const bad = (): ReturnType<typeof fresh> => {

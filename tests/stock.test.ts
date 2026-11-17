@@ -204,7 +204,10 @@ test('openDb migrates an existing v1 database idempotently without losing rows',
     raw.close();
 
     const db = openDb(file);
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    // v4 adds item price and eat-line value: old rows read NULL (unknown)
+    expect(db.prepare('SELECT cost_per_unit_cents FROM items').get()).toEqual({ cost_per_unit_cents: null });
+    expect(db.prepare('SELECT value_cents, qty FROM event_lines').get()).toEqual({ value_cents: null, qty: 10 });
     // v3 adds carbs and goal columns; old rows keep their data and read NULL (unknown), not 0
     expect(db.prepare('SELECT carbs_per_unit FROM items').get()).toEqual({ carbs_per_unit: null });
     expect(db.prepare('SELECT carbs_g FROM event_lines').get()).toEqual({ carbs_g: null });
@@ -226,6 +229,28 @@ test('openDb migrates an existing v1 database idempotently without losing rows',
     const db2 = openDb(file);
     expect(db2.prepare('SELECT COUNT(*) AS n FROM items').get()).toEqual({ n: 3 });
     db2.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('openDb migrates a v3 database to v4 keeping its rows, with price and value unknown', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mf-mig4-'));
+  const file = join(dir, 'myfood.db');
+  try {
+    const first = openDb(file);
+    first.exec('ALTER TABLE items DROP COLUMN cost_per_unit_cents; ALTER TABLE event_lines DROP COLUMN value_cents; PRAGMA user_version = 3');
+    first.exec("INSERT INTO users(id, name, emoji, code_hash, created_at) VALUES (1, 'Sam', 'x', 'h', 1)");
+    first.exec("INSERT INTO items(id, name, name_key, emoji, category, unit, step, pack_size, created_at, carbs_per_unit) VALUES (1, 'Eggs', 'eggs', 'e', 'dairy', 'pc', 1, 10, 1, 0.5)");
+    first.exec("INSERT INTO events(cid, seq, user_id, at, kind, source, cost_cents) VALUES ('c1', 1, 1, 2, 'eat', 'manual', 900)");
+    first.exec("INSERT INTO event_lines(event_cid, item_id, qty, is_set, cost_cents, carbs_g) VALUES ('c1', 1, -2, 0, 900, 1)");
+    first.close();
+
+    const db = openDb(file);
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(db.prepare('SELECT carbs_per_unit, cost_per_unit_cents FROM items').get()).toEqual({ carbs_per_unit: 0.5, cost_per_unit_cents: null });
+    expect(db.prepare('SELECT qty, cost_cents, carbs_g, value_cents FROM event_lines').get()).toEqual({ qty: -2, cost_cents: 900, carbs_g: 1, value_cents: null });
+    db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

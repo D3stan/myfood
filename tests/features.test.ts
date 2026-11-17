@@ -490,3 +490,88 @@ test('barcode lookup parses OpenFoodFacts carbohydrates (per 100g, per serving) 
     vi.unstubAllGlobals();
   }
 });
+
+const mk = (name: string, unit: string, extra: Record<string, unknown> = {}) =>
+  st('POST', '/api/items', { name, emoji: '🍚', category: 'pantry', unit, step: 1, pack_size: 1, low_at: null, ...extra });
+const idOf = (s: State, name: string) => s.items.find(i => i.name === name)!.id;
+const priceOf = (s: State, id: number) => s.items.find(i => i.id === id)!.cost_per_unit_cents;
+const valueOf = (cid: string) => (db.prepare('SELECT value_cents FROM event_lines WHERE event_cid = ?').get(cid) as { value_cents: number | null }).value_cents;
+
+test('item price: a priced buy learns it, an unpriced buy keeps it, last price wins', async () => {
+  const id = idOf(await mk('Rice', 'g'), 'Rice');
+  expect(priceOf(await st('GET', '/api/state'), id)).toBeNull();
+  await st('POST', '/api/events', { cid: 'price-b1', at: clock - 3000, kind: 'buy', lines: [{ item_id: id, qty: 1000, cost_cents: 2500 }] });
+  expect(priceOf(await st('GET', '/api/state'), id)).toBe(2.5);
+  await st('POST', '/api/events', { cid: 'price-b2', at: clock - 2000, kind: 'buy', lines: [{ item_id: id, qty: 500 }] });
+  expect(priceOf(await st('GET', '/api/state'), id)).toBe(2.5);
+  await st('POST', '/api/events', { cid: 'price-b3', at: clock - 1000, kind: 'buy', lines: [{ item_id: id, qty: 500, cost_cents: 1500 }] });
+  expect(priceOf(await st('GET', '/api/state'), id)).toBe(3);
+});
+
+test('item price: a single line without its own cost takes the event cost; several lines do not', async () => {
+  await mk('Milk', 'ml');
+  const s = await mk('Oats', 'g');
+  const milk = idOf(s, 'Milk'), oat = idOf(s, 'Oats');
+  await st('POST', '/api/events', { cid: 'price-q1', at: clock - 3000, kind: 'buy', cost_cents: 1999, lines: [{ item_id: milk, qty: 1000 }] });
+  expect(priceOf(await st('GET', '/api/state'), milk)).toBe(1.999);
+  await st('POST', '/api/events', { cid: 'price-q2', at: clock - 2000, kind: 'buy', cost_cents: 5000, lines: [{ item_id: milk, qty: 1000 }, { item_id: oat, qty: 500 }] });
+  const s2 = await st('GET', '/api/state');
+  expect(priceOf(s2, milk)).toBe(1.999);
+  expect(priceOf(s2, oat)).toBeNull();
+});
+
+test('item price: set/adjust lines, zero cost and level items never learn', async () => {
+  await mk('Eggs', 'pc');
+  const s = await mk('Olive oil', 'level');
+  const pc = idOf(s, 'Eggs'), lvl = idOf(s, 'Olive oil');
+  await st('POST', '/api/events', { cid: 'price-a1', at: clock - 3000, kind: 'adjust', lines: [{ item_id: pc, qty: 6, cost_cents: 3000 }] });
+  await st('POST', '/api/events', { cid: 'price-a2', at: clock - 2000, kind: 'buy', lines: [{ item_id: pc, qty: 6, cost_cents: 0 }] });
+  await st('POST', '/api/events', { cid: 'price-a3', at: clock - 1000, kind: 'buy', lines: [{ item_id: lvl, qty: 1, cost_cents: 4900 }] });
+  const s2 = await st('GET', '/api/state');
+  expect(priceOf(s2, pc)).toBeNull();
+  expect(priceOf(s2, lvl)).toBeNull();
+});
+
+test('eating snapshots value_cents from the price; unknown price is null; a later price change leaves history alone', async () => {
+  await mk('Eggs', 'pc', { cost_per_unit_cents: 250 });
+  const s0 = await mk('Salt', 'pc');
+  const eggs = idOf(s0, 'Eggs'), salt = idOf(s0, 'Salt');
+  await st('POST', '/api/events', { cid: 'price-e1', at: clock - 2000, kind: 'eat', lines: [{ item_id: eggs, qty: 3 }, { item_id: salt, qty: 1 }] });
+  const rows = db.prepare('SELECT item_id, value_cents FROM event_lines WHERE event_cid = ? ORDER BY rowid').all('price-e1');
+  expect(rows).toEqual([{ item_id: eggs, value_cents: 750 }, { item_id: salt, value_cents: null }]);
+  const s = await st('PATCH', `/api/items/${eggs}`, { cost_per_unit_cents: 400 });
+  expect(priceOf(s, eggs)).toBe(400);
+  expect(s.events.find(e => e.cid === 'price-e1')!.lines[0]!.value_cents).toBe(750);
+  // A new eat uses the new price; editing the old event re-snapshots at the current price (like kcal).
+  await st('POST', '/api/events', { cid: 'price-e2', at: clock - 1000, kind: 'eat', lines: [{ item_id: eggs, qty: 1 }] });
+  expect(valueOf('price-e2')).toBe(400);
+  await st('PATCH', '/api/events/price-e1', { lines: [{ item_id: eggs, qty: 2 }] });
+  expect(valueOf('price-e1')).toBe(800);
+  // value is not money paid
+  expect(db.prepare('SELECT cost_cents FROM events WHERE cid = ?').get('price-e1')).toEqual({ cost_cents: null });
+});
+
+test('cook batch: meal price per unit is ingredient prices over the batch, kept when no ingredient is priced', async () => {
+  await mk('Beef', 'g', { cost_per_unit_cents: 2 });
+  await mk('Pasta', 'g', { cost_per_unit_cents: 1 });
+  const s0 = await mk('Water', 'g');
+  const beef = idOf(s0, 'Beef'), pasta = idOf(s0, 'Pasta'), plain = idOf(s0, 'Water');
+  await st('POST', '/api/events', { cid: 'price-cs', at: clock - 5000, kind: 'buy', lines: [{ item_id: beef, qty: 1000 }, { item_id: pasta, qty: 1000 }, { item_id: plain, qty: 1000 }] });
+  // 500*2 + 400*1 = 1400 cents over 1200 g
+  const s = await st('POST', '/api/meals/cook', { cid: 'price-ck1', at: clock - 4000, name: 'Bolognese', portions: 4, total_g: 1200, ingredients: [{ item_id: beef, qty: 500 }, { item_id: pasta, qty: 400 }, { item_id: plain, qty: 100 }] });
+  const meal = s.items.find(i => i.name === 'Bolognese')!;
+  expect(meal.cost_per_unit_cents).toBe(1.1667);
+  // The meal buy carries no cost: it neither pays anything nor overwrites the computed price.
+  expect(db.prepare('SELECT cost_cents FROM events WHERE cid = ?').get('price-ck1-buy')).toEqual({ cost_cents: null });
+  const s2 = await st('POST', '/api/meals/cook', { cid: 'price-ck2', at: clock - 3000, meal_item_id: meal.id, portions: 2, total_g: 600, ingredients: [{ item_id: plain, qty: 100 }] });
+  expect(priceOf(s2, meal.id)).toBe(1.1667);
+  await st('POST', '/api/events', { cid: 'price-em', at: clock - 1000, kind: 'eat', lines: [{ item_id: meal.id, qty: 300 }] });
+  expect(valueOf('price-em')).toBe(350);
+});
+
+test('item body accepts and clears cost_per_unit_cents, and rejects negatives', async () => {
+  const id = idOf(await mk('Rice', 'g', { cost_per_unit_cents: 3 }), 'Rice');
+  expect(priceOf(await st('GET', '/api/state'), id)).toBe(3);
+  expect(priceOf(await st('PATCH', `/api/items/${id}`, { cost_per_unit_cents: null }), id)).toBeNull();
+  expect((await req('PATCH', `/api/items/${id}`, { cost_per_unit_cents: -1 })).status).toBe(400);
+});
