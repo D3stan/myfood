@@ -1,9 +1,9 @@
 import { html } from '../../html.ts';
-import { fmtNum } from '../../../shared/text.ts';
+import { currencySymbol, fmtNum } from '../../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../../shared/types.ts';
 import type { BarcodeLookup, Unit } from '../../../shared/types.ts';
-import { qOf, store as defaultStore } from '../../store.ts';
-import type { Sheet, Store } from '../../store.ts';
+import { qOf } from '../../store.ts';
+import type { Sheet } from '../../store.ts';
 import { unitOf } from './bits.ts';
 import type { V } from './bits.ts';
 import { macroBasis } from './sheets.ts';
@@ -15,9 +15,6 @@ type BarcodeDetectorCtor = (new (opts?: { formats?: string[] }) => BarcodeDetect
 
 const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
 
-let activeStream: MediaStream | null = null;
-let scanTimer = 0;
-let scanning = false;
 let detectorP: Promise<BarcodeDetectorLike> | null = null;
 
 /** Native BarcodeDetector when it reads EAN-13, else the zxing-wasm ponyfill (iOS Safari has none). */
@@ -41,94 +38,11 @@ function getDetector(): Promise<BarcodeDetectorLike> {
 const firstCode = (hits: DetectedBarcode[]): string | undefined =>
   hits.map(h => (h.rawValue ?? '').trim()).find(c => /^\d{6,14}$/.test(c));
 
-/** Live scanning needs only a camera; decoding works everywhere thanks to the ponyfill. */
-export function isBarcodeDetectorSupported(): boolean {
-  return typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
-}
-
 /** Reads a barcode from a still photo. Undefined when none is found. */
 export async function decodeBarcodePhoto(file: Blob): Promise<string | undefined> {
   const detector = await getDetector();
   const bmp = await createImageBitmap(file);
   try { return firstCode(await detector.detect(bmp)); } finally { bmp.close(); }
-}
-
-/** Stops any active camera track and detection loop so the camera never leaks. */
-export function stopScanner(s: Store = defaultStore): void {
-  scanning = false;
-  if (scanTimer) { clearTimeout(scanTimer); scanTimer = 0; }
-  if (activeStream) {
-    for (const track of activeStream.getTracks()) track.stop();
-    activeStream = null;
-  }
-  if (typeof document !== 'undefined') {
-    const vid = document.getElementById('bc-video') as HTMLVideoElement | null;
-    if (vid) vid.srcObject = null;
-  }
-  s.ui.scannerActive = false;
-}
-
-export async function startBarcodeScanner(
-  onCode: (code: string) => void | Promise<void>,
-  onStateChange?: () => void,
-  s: Store = defaultStore,
-): Promise<boolean> {
-  stopScanner(s);
-  if (!isBarcodeDetectorSupported()) {
-    s.ui.scannerSupported = false;
-    onStateChange?.();
-    return false;
-  }
-  s.ui.scannerSupported = true;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } },
-      audio: false,
-    });
-    if (s.ui.sheet?.t !== 'barcode') {
-      for (const track of stream.getTracks()) track.stop();
-      return false;
-    }
-    activeStream = stream;
-    scanning = true;
-    s.ui.scannerActive = true;
-    onStateChange?.();
-
-    const attachVideo = () => {
-      const vid = typeof document !== 'undefined' ? document.getElementById('bc-video') as HTMLVideoElement | null : null;
-      if (vid && activeStream && vid.srcObject !== activeStream) {
-        vid.srcObject = activeStream;
-        void vid.play().catch(() => {});
-      }
-      return vid;
-    };
-    attachVideo();
-
-    const detector = await getDetector();
-
-    const tick = async () => {
-      if (!scanning || s.ui.sheet?.t !== 'barcode') { stopScanner(s); return; }
-      const vid = attachVideo();
-      if (vid && vid.readyState >= 2) {
-        try {
-          const code = firstCode(await detector.detect(vid));
-          if (code) {
-            stopScanner(s);
-            s.ui.f.barcodeCode = code;
-            await onCode(code);
-            return;
-          }
-        } catch { /* ignore transient frame decode errors */ }
-      }
-      if (scanning) scanTimer = window.setTimeout(() => void tick(), 250);
-    };
-    scanTimer = window.setTimeout(() => void tick(), 200);
-    return true;
-  } catch {
-    stopScanner(s);
-    onStateChange?.();
-    return false;
-  }
 }
 
 /** Barcode quantity mode: whole packs, or the item's own unit (g, ml, pc…). Level items always count containers. */
@@ -182,7 +96,6 @@ export function barcodeSheet(v: V, _sh: Sheet) {
   const { st, ui } = v;
   const lk = ui.barcodeLookup;
   const matched = lk?.item_id != null ? st.items.find(i => i.id === lk.item_id) : undefined;
-  const supported = ui.scannerSupported || isBarcodeDetectorSupported();
   const bcUnit = (UNITS.includes(ui.f.bcUnit as Unit) ? ui.f.bcUnit : 'g') as Unit;
   const { label: macroLabel } = macroBasis(bcUnit);
   const bcPackRaw = Number((ui.f.bcPack ?? '1').replace(',', '.'));
@@ -190,30 +103,23 @@ export function barcodeSheet(v: V, _sh: Sheet) {
   const linkItem = st.items.find(i => String(i.id) === ui.f.bcLinkItem);
 
   return html`<h2 id="sheet-title">📷 Scan barcode</h2>
-    ${supported
-      ? html`<div>
-          <video id="bc-video" class="viewfinder" autoplay playsinline muted></video>
-          <div class="row" style="margin-bottom:8px">
-            ${ui.scannerActive
-              ? html`<button class="btn alt grow" data-a="stopScan">Stop camera</button>`
-              : html`<button class="btn alt grow" data-a="startScan">Start camera</button>`}
-          </div>
-        </div>`
-      : html`<p class="note small">No camera access here — take a photo of the barcode or type the digits.</p>`}
     <form class="row" style="gap:8px;margin-top:10px" data-submit="barcodeLookup">
       <input id="f-barcodeCode" type="text" inputmode="numeric" autofocus placeholder="Barcode digits (e.g. 5701234567890)" data-f="barcodeCode" value="${ui.f.barcodeCode ?? ''}" autocomplete="off">
       <button class="btn" type="submit" ${ui.online && !ui.barcodeBusy ? '' : 'disabled'}>${ui.barcodeBusy ? 'Looking…' : 'Look up'}</button>
     </form>
     <div class="row" style="margin-top:8px">
-      <label class="btn alt grow center" for="f-bcPhoto">🖼️ Photo of the barcode</label>
-      <input id="f-bcPhoto" type="file" accept="image/*" capture="environment" data-c="barcodePhoto" hidden>
+      <button class="btn alt grow" data-a="barcodeCamera">📷 Take photo</button>
+      <label class="btn alt grow center" for="f-bcPhoto">🖼️ Upload photo</label>
+      <input id="f-bcPhoto" type="file" accept="image/*" data-c="barcodePhoto" hidden>
+    </div>
+    <div class="row" style="margin-top:8px">
       <button class="btn alt grow" data-a="barcodeFallbackPhoto">🤖 Ask the AI instead</button>
     </div>
     ${lk ? (matched
       ? html`<div class="card" style="margin-top:14px">
           <div class="line" style="border:0"><span class="emoji">${matched.emoji}</span>
             <span class="n"><b>${matched.name}</b> <span class="muted small">pack ${fmtNum(matched.pack_size)} ${unitOf(matched)}</span></span></div>
-          <label class="field" for="f-buyCost">Cost (optional, ${st.currency})</label>
+          <label class="field" for="f-buyCost">Cost (optional, ${currencySymbol(st.currency)})</label>
           <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">
           ${qtyPicker(v, _sh, matched.unit, matched.pack_size)}
           <button class="btn big" style="margin-top:10px" data-a="barcodeAddPack" data-id="${matched.id}" ${qOf(_sh, 'bc') > 0 ? '' : 'disabled'}>${addLabel(qOf(_sh, 'bc'), matched.unit, matched.pack_size, bcModeOf(ui.f, matched.unit, matched.pack_size))}</button>
@@ -246,7 +152,7 @@ export function barcodeSheet(v: V, _sh: Sheet) {
             <div class="grow"><label class="field" for="f-bcCarbs">Carbs g / ${macroLabel}</label>
               <input id="f-bcCarbs" type="text" inputmode="decimal" data-f="bcCarbs" value="${ui.f.bcCarbs ?? ''}" autocomplete="off"></div>
           </div>
-          <label class="field" for="f-buyCost">Cost (optional, ${st.currency})</label>
+          <label class="field" for="f-buyCost">Cost (optional, ${currencySymbol(st.currency)})</label>
           <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">
           ${qtyPicker(v, _sh, bcUnit, bcPackN)}
           <button class="btn big" style="margin-top:10px" data-a="barcodeCreateAdd" ${ui.online && qOf(_sh, 'bc') > 0 ? '' : 'disabled'}>Create &amp; ${addLabel(qOf(_sh, 'bc'), bcUnit, bcPackN, bcModeOf(ui.f, bcUnit, bcPackN))}</button>

@@ -1,8 +1,8 @@
 // Settings pages' buttons: profile, notifications, household, presets, Siri tokens, sign out.
-import { api, createToken, revokeToken, saveSettings, subscribePush, testPush, unsubscribePush } from '../../api.ts';
+import { api, createToken, getData, revokeToken, rotateCode, saveSettings, subscribePush, testPush, unsubscribePush } from '../../api.ts';
+import type { SettingsBody } from '../../../shared/types.ts';
 import { receive, store as s } from '../../store.ts';
-import { afterState, fail, mutate, signedOut, st, toast } from '../helpers.ts';
-import { GOAL_FIELDS } from './goals.ts';
+import { afterState, commit, fail, mutate, signedOut, st, toast } from '../helpers.ts';
 import { shortcutText } from './shortcuts.ts';
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
@@ -11,6 +11,11 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(new ArrayBuffer(raw.length));
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
+}
+
+export async function loadData(): Promise<void> {
+  try { s.ui.data = await getData(); } catch (e) { fail(e); }
+  commit();
 }
 
 export const settingsActions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
@@ -30,16 +35,6 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
       delete f.meName; delete f.meEmoji; toast('Saved');
     }
   },
-  saveGoals: async () => {
-    const f = s.ui.f, me = st().me, goals: Record<string, number | null> = {};
-    for (const [k] of GOAL_FIELDS) {
-      const raw = (f[`goal_${k}`] ?? String(me.goals[k] ?? '')).trim();
-      const n = raw === '' ? null : Number(raw.replace(',', '.'));
-      if (n !== null && !(n > 0 && Number.isFinite(n))) return void toast('Goals must be positive numbers');
-      goals[k] = n;
-    }
-    if (await mutate('PATCH', '/api/me', { goals })) { for (const [k] of GOAL_FIELDS) delete f[`goal_${k}`]; toast('Saved goals'); }
-  },
   saveNotify: async () => {
     const f = s.ui.f, me = st().me;
     await mutate('PATCH', '/api/me', {
@@ -52,7 +47,7 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
     if (!currency) return void toast('Enter a currency');
     if (!navigator.onLine) return void toast("You're offline");
     try {
-      receive(s, await saveSettings({ currency }));
+      receive(s, await saveSettings({ currency: currency as SettingsBody['currency'] }));
       delete s.ui.f.currency;
       toast('Saved currency');
       afterState();
@@ -154,6 +149,33 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
   copyGuest: async () => {
     const code = st().guest_code;
     try { await navigator.clipboard.writeText(`${location.origin}/guest  passcode: ${code}`); toast('Guest link and passcode copied'); }
+    catch { toast('Copy failed — select and copy manually'); }
+  },
+  delAlias: async el => {
+    const text = el.dataset.text;
+    if (text && await mutate('DELETE', `/api/aliases/${encodeURIComponent(text)}`)) { toast('Alias deleted'); await loadData(); }
+  },
+  restoreItem: async el => {
+    if (await mutate('POST', `/api/items/${Number(el.dataset.id)}/restore`)) { toast('Item restored'); await loadData(); }
+  },
+  unlockWeek: async el => {
+    const p = el.dataset.p;
+    if (p && confirm(`Unlock ${p}? Its expenses can be added, edited or undone again.`) && await mutate('DELETE', `/api/expenses/lock/${encodeURIComponent(p)}`)) toast(`Unlocked ${p}`);
+  },
+  newAccessCode: async () => {
+    if (!confirm('Make a new access code? Your other devices will be signed out.')) return;
+    if (!navigator.onLine) return void toast("You're offline");
+    try {
+      const res = await rotateCode();
+      s.ui.newCode = res.code;
+      receive(s, res.state);
+      toast('New access code — copy it now');
+      afterState();
+    } catch (e) { fail(e); }
+  },
+  copyAccessCode: async () => {
+    if (!s.ui.newCode) return;
+    try { await navigator.clipboard.writeText(s.ui.newCode); toast('Access code copied'); }
     catch { toast('Copy failed — select and copy manually'); }
   },
   logout: async () => { await api('POST', '/api/logout').catch(() => {}); signedOut(); },

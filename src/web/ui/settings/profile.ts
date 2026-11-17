@@ -13,6 +13,19 @@ export function profile({ st, ui }: V) {
 
 
     <div class="card">
+      <h2 style="margin-top:0">Access code</h2>
+      ${ui.newCode ? html`
+        <div class="note" style="margin-bottom:8px"><b>Copy this code now</b> — it won't be shown again:
+          <div class="row" style="gap:8px;align-items:center;margin-top:6px">
+            <code id="new-code" style="flex:1;font-size:1.3rem">${ui.newCode}</code>
+            <button id="copy-code" class="btn alt" data-a="copyAccessCode">Copy</button>
+          </div>
+        </div>` : ''}
+      <button id="new-code-btn" class="btn alt" data-a="newAccessCode" ${ui.online ? '' : 'disabled'}>New access code</button>
+      <p class="small muted" style="margin:8px 0 0">Signs out your other devices. This one stays signed in.</p>
+    </div>
+
+    <div class="card">
       <h2 style="margin-top:0">Notifications</h2>
       ${ui.standalone ? '' : html`<p class="note">On iPhone/iPad, push notifications require installing MyFood first: tap Share → Add to Home Screen, then open it from there.</p>`}
       <label class="row" style="gap:8px;align-items:center;margin:8px 0;cursor:pointer">

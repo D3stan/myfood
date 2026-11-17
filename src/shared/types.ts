@@ -1,6 +1,7 @@
 // The contract between server, web and the AI adapter. Change it only through the orchestrator.
 import { z } from 'zod';
-import { ISO_DATE_RE, ISO_WEEK_RE } from './dates.ts';
+import { CURRENCIES } from './currency.ts';
+import { ISO_DATE_RE, ISO_WEEK_RE, parseIsoDate } from './dates.ts';
 
 export const UNITS = ['pc', 'slice', 'g', 'ml', 'level', 'portion'] as const;
 export const Unit = z.enum(UNITS);
@@ -254,6 +255,12 @@ export interface ApiTokenInfo {
   last_used_at: number | null;
 }
 
+/** GET /api/data: names learned from receipts and archived items, for Settings > Data. */
+export interface DataInfo {
+  aliases: { text: string; item_id: number; item_name: string; emoji: string }[];
+  archived: { id: number; name: string; emoji: string; archived_at: number }[];
+}
+
 export interface ExpenseLock {
   period: string;
   locked_by: number;
@@ -276,7 +283,31 @@ export interface DailyNutrition {
   value_cents: number;
   /** Counted eat lines with no value_cents. */
   unpriced: number;
+  /** Counted eat lines whose item has no kcal (their calories are missing from `kcal`). */
+  no_kcal: number;
 }
+
+/** Query of GET /api/stats/*: inclusive local dates, at most MAX_STATS_DAYS apart. */
+export const MAX_STATS_DAYS = 400;
+export const StatsQuery = z.object({ from: z.string().regex(ISO_DATE_RE), to: z.string().regex(ISO_DATE_RE) }).superRefine((q, ctx) => {
+  const a = parseIsoDate(q.from), b = parseIsoDate(q.to);
+  const days = a && b ? Math.round((b.getTime() - a.getTime()) / 86_400_000) + 1 : 0;
+  if (!a || !b) ctx.addIssue({ code: 'custom', message: 'from and to must be real dates (YYYY-MM-DD)' });
+  else if (days < 1 || days > MAX_STATS_DAYS) ctx.addIssue({ code: 'custom', message: `from..to must span 1 to ${MAX_STATS_DAYS} days` });
+});
+
+/** GET /api/stats/spend: what each user paid per day, and what they ate (value of counted eat lines). */
+export interface SpendStats {
+  from: string;
+  to: string;
+  paid: { day: string; user_id: number; cents: number }[];
+  ate: { day: string; user_id: number; value_cents: number; unpriced: number }[];
+}
+/** GET /api/stats/nutrition: the caller's own daily rows. */
+export interface NutritionStats { from: string; to: string; rows: DailyNutrition[] }
+export interface StatsMap { spend: SpendStats; nutrition: NutritionStats }
+/** GET /api/items/:id/prices: per-unit price of a priced buy, newest first. */
+export interface ItemPrice { at: number; unit_cents: number }
 
 export interface BarcodeProduct {
   code: string;
@@ -298,6 +329,10 @@ export interface BarcodeLookup {
   item_id: number | null;
   product: BarcodeProduct | null;
 }
+
+export interface SettleBalance { user_id: number; paid_cents: number; ate_cents: number; balance_cents: number }
+/** Paid minus ate per user since the last settlement. Positive = the household owes them. */
+export interface Settle { since: number | null; balances: SettleBalance[]; unpriced: number }
 
 export interface State {
   /** Bumped by every mutation. A response with a lower rev than the one held is stale. */
@@ -325,6 +360,7 @@ export interface State {
   push_subscribed: boolean;
   tokens: ApiTokenInfo[];
   expense_locks: ExpenseLock[];
+  settle: Settle;
   /** Last 90 days of purchase/expense events (cost_cents != null), newest first. */
   expenses: FoodEvent[];
   /** Last 90 days of daily nutrition totals per user. */
@@ -411,7 +447,7 @@ export const MeBody = z.object({
 export type MeBody = z.infer<typeof MeBody>;
 
 export const SettingsBody = z.object({
-  currency: z.string().trim().min(1).max(8),
+  currency: z.enum(CURRENCIES),
 });
 export type SettingsBody = z.infer<typeof SettingsBody>;
 

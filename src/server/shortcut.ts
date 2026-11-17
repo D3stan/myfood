@@ -3,7 +3,7 @@ import { nameKey } from '../shared/text.ts';
 import type { Preset } from '../shared/types.ts';
 import type { Db } from './db.ts';
 import { all } from './db.ts';
-import * as d from './domain.ts';
+import { listPresets } from './presets/repo.ts';
 
 export interface CookedRow { id: number; name: string; unit: string; step: number; portion_g: number | null }
 
@@ -38,7 +38,7 @@ export const portionQty = (m: CookedRow, portions: number): number =>
 
 /** Names for the Shortcut's "Choose from List" plus the one to preselect. */
 export function mealChoices(db: Db, userId: number, nowMs: number): { meals: string[]; suggested: string | null } {
-  const presets = d.listPresets(db, userId);
+  const presets = listPresets(db, userId);
   return {
     meals: [...presets.filter(p => p.lines.length).map(p => p.name), ...cookedMeals(db, userId).map(m => m.name)],
     suggested: suggestPreset(presets, nowMs)?.name ?? null,
@@ -51,7 +51,7 @@ export type MealMatch =
 
 /** Presets win over cooked meals. An empty `said` means "whatever fits the time of day". */
 export function findMeal(db: Db, userId: number, said: string | undefined, nowMs: number): MealMatch | null {
-  const presets = d.listPresets(db, userId);
+  const presets = listPresets(db, userId);
   if (!said?.trim()) {
     const p = suggestPreset(presets, nowMs);
     return p ? { kind: 'preset', preset: p } : null;

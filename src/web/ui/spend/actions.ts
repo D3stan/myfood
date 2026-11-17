@@ -1,5 +1,5 @@
 // Spend sheet and week actions.
-import { addExpense, exportExpensesUrl, lockExpenses } from '../../api.ts';
+import { addExpense, exportExpensesUrl, lockExpenses, settle } from '../../api.ts';
 import { isoDate, parseIsoDate } from '../../../shared/dates.ts';
 import { closeSheet, receive, store as s } from '../../store.ts';
 import { afterState, commit, fail, parseOptCostCents, sheet, st, toast } from '../helpers.ts';
@@ -34,6 +34,11 @@ export const spendActions: Record<string, (el: HTMLElement) => void | Promise<un
     if (!period || !navigator.onLine) return void (period ? toast("You're offline") : null);
     if (!confirm(`Lock expenses for ${period}? Locked weeks cannot be edited.`)) return;
     try { receive(s, await lockExpenses({ period })); toast(`Locked ${period}`); afterState(); } catch (e) { fail(e); }
+  },
+  settleUp: async () => {
+    if (!navigator.onLine) return void toast("You're offline");
+    if (!confirm('Mark everything as settled? Balances start again from zero.')) return;
+    try { receive(s, await settle()); toast('Settled'); afterState(); } catch (e) { fail(e); }
   },
   exportExpenses: el => {
     const period = el.dataset.p ?? '';

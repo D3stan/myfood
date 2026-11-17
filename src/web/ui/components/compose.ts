@@ -1,7 +1,7 @@
 import { html } from '../../html.ts';
 import { addDays, isoDate } from '../../../shared/dates.ts';
 import { shown } from '../../../shared/stock.ts';
-import { fmtCost, fmtNum } from '../../../shared/text.ts';
+import { currencySymbol, fmtCost, fmtNum } from '../../../shared/text.ts';
 import { qOf } from '../../store.ts';
 import type { Sheet } from '../../store.ts';
 import { VERB, stepOf, unitOf } from './bits.ts';
@@ -69,7 +69,7 @@ export function reviewSheet(v: V, sh: Sheet) {
         }).join(', ')}</div>` : ''}
       </div>`;
     })}` : ''}
-    ${!isAudit && events.length ? html`<label class="field" for="f-reviewTotalCost">Total cost (${st.currency}, optional)</label>
+    ${!isAudit && events.length ? html`<label class="field" for="f-reviewTotalCost">Total cost (${currencySymbol(st.currency)}, optional)</label>
       <input id="f-reviewTotalCost" type="text" inputmode="decimal" placeholder="0.00" data-f="reviewTotalCost" value="${ui.f.reviewTotalCost ?? ''}" autocomplete="off">` : ''}
     ${left ? '' : html`<p class="note">Nothing left to add.</p>`}
     <div class="row" style="margin-top:16px"><button class="btn alt" data-a="discard" ${ui.online && !sh.busy ? '' : 'disabled'}>Discard</button>

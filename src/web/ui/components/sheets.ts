@@ -2,7 +2,7 @@ import { html } from '../../html.ts';
 import { isoDate } from '../../../shared/dates.ts';
 import { eventNutrition } from '../../../shared/nutrition.ts';
 import { levelParts, portionCount, shown } from '../../../shared/stock.ts';
-import { fmtCost, fmtNum } from '../../../shared/text.ts';
+import { currencySymbol, fmtCost, fmtNum } from '../../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../../shared/types.ts';
 import type { Item, Unit } from '../../../shared/types.ts';
 import { qOf } from '../../store.ts';
@@ -95,6 +95,8 @@ export function itemSheet(v: V, sh: Sheet) {
     <p class="stock center">${it.unit === 'level' ? html`${level(n)} ${levelName(levelParts(n).open)}`
       : ports != null ? `${fmtNum(ports)} port · ${fmtNum(n)} g` : `${fmtNum(n)} ${it.unit}`}${owed > 0 ? html` <span class="debt-badge">${fmtNum(owed)} owed</span>` : ''}</p>
     <p class="small muted center" style="margin:-2px 0 10px">${metaBits.join(' · ')}</p>
+    ${(ui.prices[it.id] ?? []).length ? html`<div id="price-history" style="margin:0 0 10px"><p class="small muted center" style="margin:0 0 2px">Price history</p>
+      ${ui.prices[it.id]!.map(p => html`<div class="row small"><span class="grow">${isoDate(p.at)}</span><span>${fmtCost(p.unit_cents * mult, st.currency)} / ${label}</span></div>`)}</div>` : ''}
     ${owed > 0 ? html`<p class="debt-note">${fmtNum(owed)} ${it.unit} owed from earlier eats — Set exact amount to clear</p>` : ''}
     ${canPortion ? html`<div class="seg" role="group" aria-label="Unit mode" style="margin-bottom:10px">
       <button class="${usePortions ? 'on' : ''}" data-a="portionMode" data-v="1">Portions (${fmtNum(it.portion_g!)}g)</button>
@@ -104,7 +106,7 @@ export function itemSheet(v: V, sh: Sheet) {
       ? html`<div class="row wrap">${([['Full', 1], ['Half', 0.5], ['Low', 0.25], ['Out', 0]] as const).map(([l, x]) => html`<button class="btn alt grow" data-a="level" data-v="${x}">${l}</button>`)}</div>
         <div class="row wrap" style="margin-top:12px"><button class="btn alt grow" data-a="pack">+1 bought</button>
           ${sh.exact ? '' : html`<button class="linkbtn grow" data-a="exactOpen">Set exact count</button>`}</div>
-        <label class="field" for="f-buyCost">Cost when buying (optional, ${st.currency})</label>
+        <label class="field" for="f-buyCost">Cost when buying (optional, ${currencySymbol(st.currency)})</label>
         <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">
         ${sh.exact ? exactForm(ui, 'containers, e.g. 2.5 = 2 sealed + half', 'e.g. 2.5') : ''}`
       : html`${stepper(ui, 'main', rawQ, usePortions ? 0.5 : it.step, usePortions ? 'portion' : it.unit)}
@@ -112,7 +114,7 @@ export function itemSheet(v: V, sh: Sheet) {
         <div class="row"><button class="btn grow" data-a="eat">Eat</button><button class="btn grow" data-a="add">Add</button></div>
         <div class="row wrap" style="margin-top:12px"><button class="btn alt grow" data-a="pack">Add a pack (+${fmtNum(it.pack_size)})</button>
           ${sh.exact ? '' : html`<button class="linkbtn grow" data-a="exactOpen">Set exact amount</button>`}</div>
-        <label class="field" for="f-buyCost">Cost when buying (optional, ${st.currency})</label>
+        <label class="field" for="f-buyCost">Cost when buying (optional, ${currencySymbol(st.currency)})</label>
         <input id="f-buyCost" type="text" inputmode="decimal" placeholder="e.g. 29.50" data-f="buyCost" value="${ui.f.buyCost ?? ''}" autocomplete="off">
         ${sh.exact ? exactForm(ui, it.unit, '') : ''}`}
     ${it.is_cooked ? html`<div class="row" style="margin-top:10px"><button class="btn alt grow" data-a="open" data-s="cook" data-id="${it.id}">🍲 Cook another batch</button></div>` : ''}
@@ -169,7 +171,7 @@ export function eventSheet(v: V, sh: Sheet) {
 
 export function expenseSheet({ st, ui }: V, _sh: Sheet) {
   return html`<h2 id="sheet-title">Log expense</h2>
-    <label class="field" for="f-expCost">Amount (${st.currency})</label>
+    <label class="field" for="f-expCost">Amount (${currencySymbol(st.currency)})</label>
     <input id="f-expCost" type="text" inputmode="decimal" autofocus placeholder="e.g. 125.50" data-f="expCost" value="${ui.f.expCost ?? ''}" autocomplete="off">
     <label class="field" for="f-expNote">Note (optional)</label>
     <input id="f-expNote" type="text" maxlength="200" placeholder="e.g. REMA 1000, takeout" data-f="expNote" value="${ui.f.expNote ?? ''}" autocomplete="off">

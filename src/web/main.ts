@@ -9,7 +9,8 @@ import type { EventBody } from '../shared/types.ts';
 import { useFake } from './api.ts';
 import { load } from './outbox.ts';
 import { store as s } from './store.ts';
-import { commit, hooks, pump, refresh } from './ui/actions.ts';
+import { commit, hooks } from './ui/actions.ts';
+import { pump, refresh } from './ui/logging.ts';
 import { wire } from './ui/events.ts';
 
 const saved = load();
@@ -19,7 +20,6 @@ s.ui.online = navigator.onLine;
 s.ui.standalone = (navigator as Navigator & { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
 s.ui.pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 s.ui.pushPermission = s.ui.pushSupported ? Notification.permission : 'unsupported';
-s.ui.scannerSupported = 'BarcodeDetector' in window;
 
 // `npx vite` alone: ?fixture serves tests/fixture.ts and applies events locally.
 const fixture = import.meta.env.DEV && location.search.includes('fixture');
@@ -27,6 +27,9 @@ if (import.meta.env.DEV && fixture) {
   let st = structuredClone((await import('../../tests/fixture.ts')).fixture);
   s.server = null; s.pending = [];
   useFake(async (method, path, body) => {
+    if (path === '/api/data') return { aliases: [], archived: [] } as never;
+    if (path.startsWith('/api/stats/')) return { paid: [], ate: [], rows: [] } as never;
+    if (path.endsWith('/prices')) return [] as never;
     const op = path === '/api/events' ? { type: 'event' as const, body: body as EventBody }
       : method === 'DELETE' && path.startsWith('/api/events/') ? { type: 'undo' as const, cid: path.split('/').pop()! } : null;
     st = { ...(op ? applyOps(st, [op]) : st), rev: st.rev + 1 };

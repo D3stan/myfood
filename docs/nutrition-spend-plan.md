@@ -1,6 +1,6 @@
 # Nutrition + spending tracking, settings page — plan
 
-Status: proposal, 2026-11-17. Nothing implemented yet.
+Status: phases 1-5 built, plus settle up, Settings → Data, currency (ISO codes) and the feature-module split. Stats endpoints, Year view and item price history are built.
 
 ## 1. What exists today (so we build on it, not beside it)
 
@@ -73,10 +73,12 @@ ALTER TABLE users        ADD COLUMN goal_kcal REAL;      -- NULL = no goal
 ALTER TABLE users        ADD COLUMN goal_protein_g REAL;
 ALTER TABLE users        ADD COLUMN goal_fat_g REAL;
 ALTER TABLE users        ADD COLUMN goal_carbs_g REAL;
-ALTER TABLE items        ADD COLUMN cost_per_unit_cents REAL;  -- (user_version 4) last known price per item unit, NULL = unknown
+ALTER TABLE items        ADD COLUMN cost_per_unit_cents REAL;  -- (user_version 4) price per item unit (average of the last 3 priced buys), NULL = unknown
 ALTER TABLE event_lines  ADD COLUMN value_cents INTEGER;       -- eat lines: snapshot of qty × item price
 ```
 All via the existing `addCol` helper in `db.ts:migrate()`.
+
+Later steps: `user_version` 5 stores the currency as an ISO code (`DKK`, was `kr`); `user_version` 6 adds `settlements (id, at, by_user_id, note)`, the "settled" state for settle up.
 
 - **Carbs** flow through every place protein/fat do: item form, barcode (OpenFoodFacts `carbohydrates_100g`), AI prompt schema, cook batch, `snapshotLineNutrition`, MCP item tools. Old rows stay NULL = "unknown", never 0; the UI shows "—" for an unknown carbs total rather than a wrong number.
 - **Goals** are columns on `users` (one row per user, same lifecycle as `notify_*`); the reviewer argued a separate table buys nothing at this size and I agree. `State.me` carries them (needed offline).
@@ -157,7 +159,8 @@ Me after the move: Today card → frame selector → chart → averages. Nothing
 3. **Item price**: learn the price on buy, item form field, MCP fields, snapshot `value_cents` on eat, cook meal price. Tests: a priced buy sets the rate; an unpriced buy keeps the old rate; eating snapshots the value; changing the price later doesn't change past lines; a cooked meal's price per portion.
 4. **Frames + charts**: `shared/period.ts`, `components/frame.ts`, `components/chart.ts`; Me trend (N4–N7) and Spend (S1–S4, S6). Tests: `periodRange` (ISO week across year end, month edges, partial window), chart SVG output for empty / single / stacked.
 5. **MCP page + per-user MCP tokens** (independent of 2–4; `MCP_SECRET` stays).
-6. *(later)* deferred items as needed: settle up first, then stats endpoints.
+6. **Settle up** (done): `shared/settle.ts` + `settlements` table, "Mark as settled" on Spend. **Settings → Data** (done). **Currency** (done): ISO codes, `shared/currency.ts`. **Feature modules** (done): `server/{items,events,presets,cooking,spend,nutrition}/`, `web/ui/<feature>/`, `shared/spend.ts`.
+7. *Later:* stats endpoints, Year view, price history.
 
 ## 8. Decisions (2026-11-17)
 - Carbs: **in**, phase 2.

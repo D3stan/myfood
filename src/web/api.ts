@@ -3,13 +3,16 @@ import type {
   BarcodeLinkBody,
   BarcodeLookup,
   CookBody,
+  DataInfo,
   ExpenseBody,
+  ItemPrice,
   JobMode,
   LockPeriodBody,
   PushSubscribeBody,
   PushUnsubscribeBody,
   SettingsBody,
   State,
+  StatsMap,
   TokenBody,
 } from '../shared/types.ts';
 
@@ -51,6 +54,7 @@ export function api(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, b
 export const cookMeal = (body: CookBody): Promise<State> => api('POST', '/api/meals/cook', body);
 export const addExpense = (body: ExpenseBody): Promise<State> => api('POST', '/api/expenses', body);
 export const lockExpenses = (body: LockPeriodBody): Promise<State> => api('POST', '/api/expenses/lock', body);
+export const settle = (): Promise<State> => api('POST', '/api/settle', {});
 export const exportExpensesUrl = (period: string, format: 'csv' | 'json'): string =>
   `/api/expenses/export?period=${encodeURIComponent(period)}&format=${encodeURIComponent(format)}`;
 
@@ -77,3 +81,9 @@ export const startJob = (text: string, images: Blob[], mode: JobMode = 'auto'): 
   return api('POST', '/api/jobs', fd);
 };
 export const postJob = startJob;
+
+export const getStats = <K extends keyof StatsMap>(kind: K, from: string, to: string): Promise<StatsMap[K]> =>
+  request<StatsMap[K]>('GET', `/api/stats/${kind}?from=${from}&to=${to}`);
+export const getItemPrices = (id: number): Promise<ItemPrice[]> => request<ItemPrice[]>('GET', `/api/items/${id}/prices`);
+export const getData = (): Promise<DataInfo> => request<DataInfo>('GET', '/api/data');
+export const rotateCode = (): Promise<{ code: string; state: State }> => request<{ code: string; state: State }>('POST', '/api/me/code');

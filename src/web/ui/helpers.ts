@@ -3,7 +3,6 @@ import { ApiError, api, onUnauthorized } from '../api.ts';
 import { clear, save } from '../outbox.ts';
 import { parseCostCents } from '../../shared/text.ts';
 import { receive, store as s, view } from '../store.ts';
-import { stopScanner } from './components/barcode.ts';
 import { render } from './render.ts';
 
 export const hooks: { state?: () => void } = {};
@@ -37,9 +36,8 @@ export async function mutate(method: 'POST' | 'PATCH' | 'DELETE', path: string, 
 }
 
 export const signedOut = (): void => {
-  stopScanner(s);
   s.server = null; s.pending = []; s.ui.loggedOut = true; s.ui.sheet = null; s.ui.tab = 'pantry';
-  s.ui.newToken = null; s.ui.barcodeLookup = null; s.ui.page = [];
+  s.ui.newToken = null; s.ui.newCode = null; s.ui.data = null; s.ui.stats = { spend: {}, nutrition: {} }; s.ui.prices = {}; s.ui.barcodeLookup = null; s.ui.page = [];
   clear(); commit();
 };
 onUnauthorized(signedOut);
