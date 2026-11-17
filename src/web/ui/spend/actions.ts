@@ -26,6 +26,9 @@ export const spendActions: Record<string, (el: HTMLElement) => void | Promise<un
       afterState();
     } catch (e) { fail(e); } finally { sh.busy = false; }
   },
+  spendScope: el => {
+    s.ui.spendScope = el.dataset.v === 'mine' ? 'mine' : 'all';
+  },
   lockWeek: async el => {
     const period = el.dataset.p;
     if (!period || !navigator.onLine) return void (period ? toast("You're offline") : null);

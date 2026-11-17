@@ -1,9 +1,13 @@
 import { html } from '../../html.ts';
-import { isoDate, isoWeek, weekRange } from '../../../shared/dates.ts';
+import { isoDate, isoWeek, parseIsoDate, weekRange } from '../../../shared/dates.ts';
+import { computeDailyNutrition } from '../../../shared/nutrition.ts';
+import { frameNav, periodRange } from '../../../shared/period.ts';
 import { fmtCost } from '../../../shared/text.ts';
 import type { ExpenseLock, FoodEvent } from '../../../shared/types.ts';
 import { clock, lineText, userOf } from '../components/bits.ts';
 import type { V } from '../components/bits.ts';
+import { COLORS, barChart } from '../components/chart.ts';
+import { frameBar, frameOf } from '../components/frame.ts';
 
 interface WeekGroup {
   period: string;
@@ -51,7 +55,22 @@ function groupExpensesByWeek(expenses: FoodEvent[], locks: ExpenseLock[], now: n
 export function spend(v: V, now: number | Date = new Date()) {
   const { st, ui } = v;
   const nowMs = now instanceof Date ? now.getTime() : now;
-  const groups = groupExpensesByWeek(st.expenses, st.expense_locks, nowMs);
+  const fr = frameOf(ui, 'spend'), range = periodRange(fr.frame, fr.offset, nowMs), nav = frameNav(fr.frame, fr.offset, nowMs);
+  const inFrame = new Set(range.days);
+  const mineOnly = ui.spendScope === 'mine';
+  const paid = st.expenses.filter(e => (e.cost_cents ?? 0) > 0 && inFrame.has(isoDate(e.at)));
+  const shown = mineOnly ? paid.filter(e => e.user_id === st.me.id) : paid;
+  const weeks = new Set(range.days.map(d => isoWeek(parseIsoDate(d)!)));
+  const groups = groupExpensesByWeek(st.expenses.filter(e => !mineOnly || e.user_id === st.me.id), st.expense_locks, nowMs)
+    .filter(g => weeks.has(g.period));
+  const total = paid.reduce((a, e) => a + e.cost_cents!, 0);
+  const ate = computeDailyNutrition(st.events, st.items, st.daily_nutrition).filter(d => inFrame.has(d.day));
+  const paidBy = (id: number) => paid.filter(e => e.user_id === id).reduce((a, e) => a + e.cost_cents!, 0);
+  // month = one bar per day (about 8 labels): simpler than ISO-week buckets
+  const bars = range.days.map((d, i) => ({
+    label: fr.frame === 'week' ? 'MTWTFSS'[i]! : String(i + 1),
+    values: st.users.map(u => shown.filter(e => e.user_id === u.id && isoDate(e.at) === d).reduce((a, e) => a + e.cost_cents!, 0)),
+  }));
   const hasAny = st.expenses.some(e => (e.cost_cents ?? 0) > 0) || st.expense_locks.length > 0;
 
   return html`
@@ -60,6 +79,27 @@ export function spend(v: V, now: number | Date = new Date()) {
       <button class="btn right" data-a="open" data-s="expense">+ Log expense</button>
     </div>
     ${hasAny ? '' : html`<p class="note">No expenses logged yet. Tap "+ Log expense" or scan a receipt with prices.</p>`}
+    ${frameBar('spend', fr.frame, fr.offset, range.label, nav.canPrev, nav.partial)}
+    <div class="card" id="spend-summary">
+      <div class="row" style="align-items:center"><span class="small muted grow">Household paid</span><span id="spend-total" style="font-family:'Permanent Marker',cursive;font-size:1.6rem">${fmtCost(total, st.currency)}</span></div>
+      ${barChart({ bars, fmt: c => fmtCost(c, st.currency) })}
+      <div class="row small muted" style="gap:10px;flex-wrap:wrap;margin:6px 0">
+        ${st.users.map((u, i) => html`<span><i style="display:inline-block;width:10px;height:10px;border:1px solid var(--ink);background:${COLORS[i % COLORS.length]!}"></i> ${u.emoji} ${u.name}</span>`)}
+      </div>
+      <div class="seg" style="margin:0 0 6px" role="group" aria-label="Spend scope">
+        <button id="spend-scope-all" class="${mineOnly ? '' : 'on'}" data-a="spendScope" data-v="all">All</button>
+        <button id="spend-scope-mine" class="${mineOnly ? 'on' : ''}" data-a="spendScope" data-v="mine">Mine</button>
+      </div>
+      <div id="spend-users">${st.users.map(u => {
+        const p = paidBy(u.id), mine = ate.filter(d => d.user_id === u.id);
+        const unpriced = mine.reduce((a, d) => a + d.unpriced, 0);
+        return html`<div class="row" id="spend-user-${u.id}" style="margin-top:6px;flex-wrap:wrap">
+          <span class="grow">${u.emoji} ${u.name}</span>
+          <span>paid ${fmtCost(p, st.currency)}${total > 0 ? ` (${Math.round((p / total) * 100)}%)` : ''}</span>
+          <span>· ate ${fmtCost(mine.reduce((a, d) => a + d.value_cents, 0), st.currency)}${unpriced > 0 ? html` <span class="small muted">+${unpriced} unpriced</span>` : ''}</span>
+        </div>`;
+      })}</div>
+    </div>
     ${groups.map(g => html`
       <div class="card" id="week-${g.period}">
         <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap">

@@ -249,9 +249,10 @@ describe('v2 sheets and helpers', () => {
     const spendOut = appHtml(s, new Date(fixture.now));
     expect(spendOut).toContain('REMA 1000');
     expect(spendOut).toContain('124.50 kr');
-    expect(spendOut).toContain('Locked');
     expect(spendOut).toContain('data-a="lockWeek"');
     expect(spendOut).toContain('data-a="exportExpenses"');
+    s.ui.frames.spend = { frame: 'week', offset: -1 }; // the locked week
+    expect(appHtml(s, new Date(fixture.now))).toContain('Locked');
   });
 
   test('visibleLowItems excludes other users personal items and findCreatedItem matches owner_id + nameKey', () => {

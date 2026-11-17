@@ -47,6 +47,7 @@ export interface Ui {
   seenDone: Set<number>;
   ownerFilter: 'all' | 'mine' | 'shared';
   historyScope: 'me' | 'all';
+  spendScope: 'all' | 'mine';
   /** Time-frame selector state per screen key ("me", "spend"); missing = week, current. */
   frames: Record<string, { frame: Frame; offset: number }>;
   jobMode: JobMode;
@@ -73,7 +74,7 @@ export const newStore = (server: State | null = null, pending: PendingOp[] = [])
   ui: {
     tab: 'pantry', page: [], sheet: null, f: {}, editing: null, toast: null,
     online: true, loggedOut: false, standalone: true, files: [], seenDone: new Set(),
-    ownerFilter: 'all', historyScope: 'me', frames: {}, jobMode: 'auto',
+    ownerFilter: 'all', historyScope: 'me', spendScope: 'all', frames: {}, jobMode: 'auto',
     barcodeLookup: null, barcodeBusy: false, scannerActive: false, scannerSupported: false,
     newToken: null, pushSupported: false, pushPermission: 'default',
   },

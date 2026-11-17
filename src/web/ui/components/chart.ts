@@ -2,7 +2,7 @@
 import { html } from '../../html.ts';
 
 const W = 300, PLOT = 100, TOP = 6, H = TOP + PLOT + 16;
-const COLORS = ['var(--green)', 'var(--blue)', 'var(--gold)', 'var(--red)'];
+export const COLORS = ['var(--green)', 'var(--blue)', 'var(--gold)', 'var(--red)'];
 
 export interface Bar { label: string; values: number[] }
 
