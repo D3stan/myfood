@@ -2,8 +2,9 @@ import { defineConfig } from 'vitest/config';
 import { VitePWA } from 'vite-plugin-pwa';
 
 // One id per build: baked into the bundle as __BUILD__ and written to dist/web/build.txt for the server.
+// scripts/deploy.sh sets BUILD_ID to the commit, so /api/health says which commit is live.
 export default defineConfig(({ command }) => {
-  const build = command === 'serve' ? 'dev' : Date.now().toString(36);
+  const build = command === 'serve' ? 'dev' : process.env.BUILD_ID || Date.now().toString(36);
   return {
   root: 'src/web',
   define: { __BUILD__: JSON.stringify(build) },

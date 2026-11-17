@@ -4,4 +4,4 @@ Description=MyFood database backup
 [Service]
 Type=oneshot
 User=pantry
-ExecStart=/opt/myfood/scripts/backup.sh
+ExecStart=/opt/myfood/current/scripts/backup.sh

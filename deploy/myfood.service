@@ -7,7 +7,8 @@ Wants=network-online.target
 # A service account with no sudo rights except the one line in /etc/sudoers.d/myfood. The login user myfood is the admin.
 User=pantry
 Group=pantry
-WorkingDirectory=/opt/myfood
+# A symlink to the live release; scripts/deploy.sh switches it.
+WorkingDirectory=/opt/myfood/current
 EnvironmentFile=/etc/myfood.env
 EnvironmentFile=-/etc/myfood-mcp.env
 ExecStart=/usr/bin/node src/server/main.ts
