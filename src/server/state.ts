@@ -172,6 +172,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     jobs,
     ai: { ready: env.ai },
     currency: getMeta(db, 'currency') ?? DEFAULT_CURRENCY,
+    country: getMeta(db, 'country') ?? '',
     vapid_public_key: getMeta(db, 'vapid_public_key'),
     push_subscribed: hasPushSubscriptions(db, userId),
     tokens: listApiTokens(db, userId),

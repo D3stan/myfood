@@ -51,6 +51,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       const nowMs = now();
       const uid = resolveReadUserId(db, user_id, opts?.defaultUserId, opts?.forcedUserId);
       const currency = getMeta(db, 'currency') ?? DEFAULT_CURRENCY;
+      const country = getMeta(db, 'country') ?? '';
       const rev = getRev(db);
 
       if (uid === null) {
@@ -58,6 +59,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
           rev,
           now: nowMs,
           currency,
+          country,
           me: null,
           users: [],
           items: loadHydratedItems(db, nowMs, false),
@@ -82,6 +84,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         rev: st.rev,
         now: st.now,
         currency: st.currency,
+        country: st.country ?? '',
         me: st.me,
         users: st.users,
         items,
@@ -123,13 +126,15 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       );
     }),
   );
+
   server.registerTool(
     'set_settings',
     {
       title: 'Update Household or User Settings',
-      description: 'Update household currency (ISO 4217 code: ' + CURRENCIES.join(', ') + ') and/or a user notification preferences (notify_low, notify_expiry) and daily nutrition goals (goals: kcal, protein_g, fat_g, carbs_g; null clears one).',
+      description: 'Update household currency (ISO 4217 code: ' + CURRENCIES.join(', ') + '), country, and/or a user notification preferences (notify_low, notify_expiry) and daily nutrition goals (goals: kcal, protein_g, fat_g, carbs_g; null clears one).',
       inputSchema: {
-        currency: SettingsBody.shape.currency.optional().describe('Household currency, ISO 4217 code'),
+        currency: SettingsBody.shape.currency.describe('Household currency, ISO 4217 code'),
+        country: SettingsBody.shape.country.describe('ISO 2-letter country code for barcode lookups (e.g. dk, it, us; empty clears)'),
         user_id: z.number().int().positive().optional().describe('User ID when updating notify_low or notify_expiry'),
         notify_low: MeBody.shape.notify_low.describe('Enable/disable low-stock notifications'),
         notify_expiry: MeBody.shape.notify_expiry.describe('Enable/disable expiry notifications'),
@@ -139,11 +144,11 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     },
     (args) => runTool(() => {
       const hasUserUpdate = args.notify_low !== undefined || args.notify_expiry !== undefined || args.goals !== undefined;
-      if (args.currency === undefined && !hasUserUpdate) {
-        fail(400, 'Provide currency, notify_low, notify_expiry, and/or goals');
+      if (args.currency === undefined && args.country === undefined && !hasUserUpdate) {
+        fail(400, 'Provide currency, country, notify_low, notify_expiry, and/or goals');
       }
-      if (args.currency !== undefined) {
-        patchSettings(db, SettingsBody.parse({ currency: args.currency }));
+      if (args.currency !== undefined || args.country !== undefined) {
+        patchSettings(db, SettingsBody.parse(stripUndefined({ currency: args.currency, country: args.country })));
       }
       let updatedUser: { id: number; name: string; emoji: string; notify_low: boolean; notify_expiry: boolean; goals: Record<'kcal' | 'protein_g' | 'fat_g' | 'carbs_g', number | null> } | null = null;
       if (hasUserUpdate) {
@@ -174,8 +179,10 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         };
       }
       const currency = getMeta(db, 'currency') ?? DEFAULT_CURRENCY;
-      return okResult(`Updated settings (currency=${currency}).`, {
+      const country = getMeta(db, 'country') ?? '';
+      return okResult(`Updated settings (currency=${currency}, country=${country || 'auto'}).`, {
         currency,
+        country,
         user: updatedUser,
         rev: getRev(db),
       });

@@ -11,14 +11,14 @@ import { findCreatedItem, item, logged, parseOptNum } from '../logging.ts';
 const amountText = (unit: Unit, q: number): string =>
   unit === 'level' ? `${fmtNum(q)} ${q === 1 ? 'container' : 'containers'}` : `${fmtNum(q)} ${unit}`;
 
-async function runBarcodeLookup(rawCode: string): Promise<void> {
+async function runBarcodeLookup(rawCode: string, opts?: { refresh?: boolean }): Promise<void> {
   const code = rawCode.trim();
   if (!/^\d{6,14}$/.test(code)) return void toast('Enter 6 to 14 barcode digits');
   if (!navigator.onLine) return void toast("You're offline");
   s.ui.barcodeBusy = true;
   commit();
   try {
-    const lk = await lookupBarcode(code);
+    const lk = await lookupBarcode(code, opts);
     s.ui.barcodeLookup = lk;
     if (s.ui.sheet?.t === 'barcode') s.ui.sheet.q.bc = 1;
     s.ui.f.bcMode = 'pack';
@@ -54,6 +54,7 @@ export function takeBarcodePhoto(): void {
 
 export const barcodeActions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   barcodeLookup: () => runBarcodeLookup(s.ui.f.barcodeCode ?? ''),
+  barcodeRefresh: () => runBarcodeLookup(s.ui.barcodeLookup?.code ?? s.ui.f.barcodeCode ?? '', { refresh: true }),
   barcodeCamera: () => takeBarcodePhoto(),
   barcodePhoto: el => {
     const input = el as HTMLInputElement, file = input.files?.[0];

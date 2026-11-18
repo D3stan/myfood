@@ -267,6 +267,7 @@ export function registerItemTools(server: McpServer, { db, now, lookupBarcode }:
       description: 'Resolve a 6-14 digit barcode against the local barcodes cache and Open Food Facts.',
       inputSchema: {
         code: z.string().trim().regex(/^\d{6,14}$/, 'Barcode must be 6 to 14 digits').describe('6-14 digit EAN/UPC barcode'),
+        refresh: z.boolean().optional().describe('Bypass the local cache and re-query Open Food Facts'),
       },
       annotations: {
         readOnlyHint: false,
@@ -275,9 +276,11 @@ export function registerItemTools(server: McpServer, { db, now, lookupBarcode }:
         openWorldHint: true,
       },
     },
-    ({ code }) => runTool(async () => {
+    ({ code, refresh }) => runTool(async () => {
       const nowMs = now();
-      const lookup = await resolveBarcode(db, code, lookupBarcode ?? defaultBarcodeLookup, nowMs);
+      const lookup = await resolveBarcode(db, code, lookupBarcode ?? defaultBarcodeLookup, nowMs, {
+        forceRefresh: Boolean(refresh),
+      });
       const item = lookup.item_id != null ? getHydratedItemById(db, lookup.item_id, nowMs) : null;
       return okResult(
         lookup.found

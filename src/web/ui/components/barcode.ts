@@ -73,15 +73,21 @@ const addLabel = (n: number, unit: Unit, packSize: number, mode: BcMode): string
   return unit === 'level' ? `Add ${fmtNum(total)} ${total === 1 ? 'container' : 'containers'}` : `Add ${fmtNum(total)} ${unit}`;
 };
 
+const CATEGORY_EMOJI: Record<string, string> = {
+  meals: '🍲', dairy: '🥛', meat: '🥩', bakery: '🍞', produce: '🥬',
+  pantry: '📦', spices: '🧂', frozen: '🧊', drinks: '🥤', other: '📦',
+};
+
 /** Pre-fills quick-create fields from an Open Food Facts / cached barcode lookup. */
 export function barcodeToFields(lk: BarcodeLookup): Record<string, string> {
   const p = lk.product;
   const unit: Unit = p?.unit ?? 'g';
+  const category = p?.category ?? 'pantry';
   const { mult } = macroBasis(unit);
   return {
     bcName: p?.product_name ?? '',
-    bcEmoji: '📦',
-    bcCategory: p?.category ?? 'pantry',
+    bcEmoji: CATEGORY_EMOJI[category] ?? '📦',
+    bcCategory: category,
     bcUnit: unit,
     bcPack: fmtNum(p?.pack_size ?? 1),
     bcKcal: p?.kcal_per_unit != null ? fmtNum(p.kcal_per_unit * mult) : '',
@@ -126,8 +132,17 @@ export function barcodeSheet(v: V, _sh: Sheet) {
         </div>`
       : html`<div class="card" style="margin-top:14px">
           ${lk.found && lk.product
-            ? html`<p style="margin:0 0 8px"><b>${lk.product.product_name ?? 'Product found'}</b>${lk.product.brand ? ` · ${lk.product.brand}` : ''}</p>`
-            : html`<p class="muted small" style="margin:0 0 8px">Not found in database for ${lk.code}. Create a new item or link an existing one:</p>`}
+            ? html`<div class="row" style="align-items:center;gap:8px;margin-bottom:8px">
+                <p class="grow" style="margin:0"><b>${lk.product.product_name ?? 'Product found'}</b>${lk.product.brand ? ` · ${lk.product.brand}` : ''}</p>
+                <button class="btn alt small" data-a="barcodeRefresh" ${ui.online && !ui.barcodeBusy ? '' : 'disabled'}>↻ Refresh</button>
+              </div>
+              ${lk.product.kcal_per_unit == null && lk.product.protein_per_unit == null && lk.product.fat_per_unit == null && lk.product.carbs_per_unit == null
+                ? html`<p class="muted small" style="margin:0 0 8px">Open Food Facts had no nutrition data for this product — enter macros below if needed.</p>`
+                : ''}`
+            : html`<div class="row" style="align-items:center;gap:8px;margin-bottom:8px">
+                <p class="muted small grow" style="margin:0">Not found in database for ${lk.code}. Create a new item or link an existing one:</p>
+                <button class="btn alt small" data-a="barcodeRefresh" ${ui.online && !ui.barcodeBusy ? '' : 'disabled'}>↻ Retry</button>
+              </div>`}
           <h3>Create &amp; Add</h3>
           <label class="field" for="f-bcName">Name</label>
           <input id="f-bcName" type="text" data-f="bcName" value="${ui.f.bcName ?? ''}" autocomplete="off">

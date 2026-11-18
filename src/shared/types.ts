@@ -356,6 +356,8 @@ export interface State {
   /** Outcome of the most recent AI job. null = no job has run since start-up. */
   ai: { ready: boolean | null };
   currency: string;
+  /** Optional ISO 3166-1 alpha-2 country code (lowercase, '' = global/auto) used for barcode lookups. */
+  country?: string;
   vapid_public_key: string | null;
   push_subscribed: boolean;
   tokens: ApiTokenInfo[];
@@ -447,7 +449,8 @@ export const MeBody = z.object({
 export type MeBody = z.infer<typeof MeBody>;
 
 export const SettingsBody = z.object({
-  currency: z.enum(CURRENCIES),
+  currency: z.enum(CURRENCIES).optional(),
+  country: z.string().trim().toLowerCase().regex(/^$|^[a-z]{2}$/, 'Use a 2-letter country code (e.g. dk, it, us)').optional(),
 });
 export type SettingsBody = z.infer<typeof SettingsBody>;
 

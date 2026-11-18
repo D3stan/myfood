@@ -42,8 +42,12 @@ export function patchMe(db: Db, userId: number, b: MeBody): void {
 }
 
 export function patchSettings(db: Db, b: SettingsBody): void {
+  if (b.currency === undefined && b.country === undefined) {
+    fail(400, 'Provide currency or country');
+  }
   transaction(db, () => {
-    setMeta(db, 'currency', b.currency.trim());
+    if (b.currency !== undefined) setMeta(db, 'currency', b.currency.trim());
+    if (b.country !== undefined) setMeta(db, 'country', b.country.trim().toLowerCase());
     bumpRev(db);
   });
 }
