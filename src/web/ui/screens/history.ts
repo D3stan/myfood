@@ -24,7 +24,8 @@ export function groupByDay(events: FoodEvent[], now = new Date()): { day: string
   return groups;
 }
 
-export function history({ st, ui }: V) {
+export function history({ st, ui }: V, now: Date | number = new Date()) {
+  const nowDate = now instanceof Date ? now : new Date(now);
   const daily = computeDailyNutrition(st.events, st.items, st.daily_nutrition);
   const dayMacros = (day: string): { kcal: number; protein_g: number; fat_g: number; carbs_g: number | null } => {
     let kcal = 0, protein_g = 0, fat_g = 0, carbs_g: number | null = null;
@@ -48,7 +49,7 @@ export function history({ st, ui }: V) {
       </div>
     </div>
     ${st.events.length ? '' : html`<p class="note">Nothing logged yet.</p>`}
-    ${groupByDay(st.events).map(g => {
+    ${groupByDay(st.events, nowDate).map(g => {
       const m = dayMacros(g.day);
       return html`
         <div class="day row" style="align-items:center;gap:8px;flex-wrap:wrap">

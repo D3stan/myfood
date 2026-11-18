@@ -9,6 +9,7 @@ import { composeSheet, reviewSheet } from './components/compose.ts';
 import { cookSheet } from './components/cook.ts';
 import { composer, tabbar, toast } from './components/nav.ts';
 import { eventSheet, expenseSheet, itemFormSheet, itemSheet, presetEditSheet, presetSheet } from './components/sheets.ts';
+import { syncTour, tourHtml } from './components/tour.ts';
 import { history } from './screens/history.ts';
 import { login } from './screens/login.ts';
 import { me } from './screens/me.ts';
@@ -18,18 +19,26 @@ import { spend } from './spend/screen.ts';
 
 const page = (v: V, key: string): Html => {
   const p = PAGES[key];
-  return html`<div class="row" style="align-items:center;gap:8px"><button id="page-back" class="linkbtn" data-a="back">‹ Back</button><h1 class="grow" style="margin:0">${p?.title ?? ''}</h1></div>${p?.render(v)}`;
+  return html`<div class="top"><button id="page-back" class="btn alt icon" data-a="back" aria-label="Back">←</button><h1 class="grow" style="margin:0">${p?.title ?? ''}</h1></div>${p?.render(v)}`;
 };
+
+const demoBanner = (s: Store): Html => s.ui.demo
+  ? html`<div class="demo-bar" id="demo-bar">
+      <span class="grow"><b>Demo mode</b> · Sample pantry</span>
+      <button type="button" class="btn alt sm" id="demo-tour" data-a="tourStart">Tour</button>
+      <button type="button" class="btn alt sm" id="demo-exit" data-a="exitDemo">Exit</button>
+    </div>`
+  : html``;
 
 // Pure: state in, HTML string out (so tests need no DOM).
 export function appHtml(s: Store, now = new Date()): string {
   const st = view(s);
   const out: Html = !st
     ? (s.ui.loggedOut ? login(s.ui) : html`<p class="center muted" style="margin-top:30vh">Loading…</p>`)
-    : html`${s.ui.page.length ? page({ st, ui: s.ui }, s.ui.page[s.ui.page.length - 1]!)
+    : html`${demoBanner(s)}${s.ui.page.length ? page({ st, ui: s.ui }, s.ui.page[s.ui.page.length - 1]!)
         : s.ui.tab === 'pantry' ? pantry({ st, ui: s.ui }, now)
         : s.ui.tab === 'spend' ? spend({ st, ui: s.ui }, st.now)
-        : s.ui.tab === 'history' ? history({ st, ui: s.ui })
+        : s.ui.tab === 'history' ? history({ st, ui: s.ui }, now)
         : me({ st, ui: s.ui })}${composer()}${tabbar(s.ui.tab)}`;
   return htmlToString(out);
 }
@@ -78,5 +87,10 @@ export function render(s: Store): void {
   lastKey = key;
   const num = s.ui.editing && document.querySelector<HTMLInputElement>('input[data-c=num]');
   if (num && document.activeElement !== num) { num.focus(); num.select(); }
+  const tourEl = document.getElementById('tour');
+  if (tourEl) {
+    Idiomorph.morph(tourEl, tourHtml(s), { morphStyle: 'innerHTML' });
+    syncTour(s);
+  }
   document.title = 'MyFood';
 }

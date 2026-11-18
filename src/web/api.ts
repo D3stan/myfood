@@ -22,10 +22,10 @@ export class ApiError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
-type Fake = (method: string, path: string, body?: unknown) => Promise<State>;
+type Fake = (method: string, path: string, body?: unknown) => Promise<unknown>;
 let fake: Fake | null = null;
-/** Dev only: answer every call locally (see main.ts, ?fixture). */
-export const useFake = (f: Fake): void => { fake = f; };
+/** Answer every call locally (used by ?fixture and interactive demo mode). */
+export const useFake = (f: Fake | null): void => { fake = f; };
 
 let unauthorized: () => void = () => {};
 export const onUnauthorized = (f: () => void): void => { unauthorized = f; };

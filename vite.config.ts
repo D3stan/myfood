@@ -9,7 +9,7 @@ export default defineConfig(({ command }) => {
   root: 'src/web',
   define: { __BUILD__: JSON.stringify(build) },
   build: { outDir: '../../dist/web', emptyOutDir: true },
-  server: { proxy: { '/api': 'http://127.0.0.1:3000' } },
+  server: { proxy: { '/api/': 'http://127.0.0.1:3000' } },
   test: { root: '.', include: ['tests/**/*.test.ts'] },
   plugins: [
     { name: 'build-id', generateBundle() { this.emitFile({ type: 'asset', fileName: 'build.txt', source: build }); } },

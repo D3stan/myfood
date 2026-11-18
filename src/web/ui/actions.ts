@@ -7,7 +7,8 @@ import { fmtNum, parseNum } from '../../shared/text.ts';
 import { api } from '../api.ts';
 import { hourToTime } from './components/bits.ts';
 import { itemToFields } from './components/sheets.ts';
-import { afterState, commit, fail, hooks, sheet, st, sync, toast } from './helpers.ts';
+import { TOUR_STEPS } from './components/tour.ts';
+import { afterState, commit, enterDemo, exitDemo, fail, hooks, sheet, st, sync, toast } from './helpers.ts';
 import { barcodeActions, takeBarcodePhoto } from './barcode/actions.ts';
 import { cookStateFor, cookingActions } from './cooking/actions.ts';
 import { eventActions } from './events/actions.ts';
@@ -15,7 +16,7 @@ import { frameActions } from './frame-actions.ts';
 import { loadPrices } from './stats.ts';
 import { itemActions } from './items/actions.ts';
 import { jobActions } from './jobs/actions.ts';
-import { pump, visibleLowItems } from './logging.ts';
+import { pump, refresh, visibleLowItems } from './logging.ts';
 import { nutritionActions } from './nutrition/actions.ts';
 import { presetActions } from './presets/actions.ts';
 import { shoppingText } from './screens/pantry.ts';
@@ -24,6 +25,18 @@ import { spendActions } from './spend/actions.ts';
 
 export { afterState, commit, hooks, sync, toast };
 
+function goTourStep(idx: number): void {
+  const clamped = Math.max(0, Math.min(TOUR_STEPS.length - 1, idx));
+  const step = TOUR_STEPS[clamped]!;
+  closeSheet(s);
+  const tabChanged = s.ui.tab !== step.tab || s.ui.page.length > 0;
+  s.ui.page = [];
+  s.ui.tab = step.tab;
+  s.ui.tour = { step: clamped };
+  if (tabChanged && typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo(0, 0);
+  }
+}
 const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   rerender: () => {},
   go: el => { s.ui.newToken = null; s.ui.newCode = null; s.ui.page.push(el.dataset.p!); if (el.dataset.p === 'data') void loadData(); history.pushState(null, ''); window.scrollTo(0, 0); },
@@ -110,6 +123,19 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
     if (!code) return;
     try { receive(s, await api('POST', '/api/login', { code })); s.ui.f.code = ''; afterState(); } catch (e) { fail(e); }
   },
+  startDemo: () => { enterDemo({ tour: true }); },
+  exitDemo: () => { exitDemo(); void refresh(); void pump(); },
+  tourStart: () => { goTourStep(0); },
+  tourNext: () => {
+    const cur = s.ui.tour?.step ?? 0;
+    if (cur + 1 >= TOUR_STEPS.length) s.ui.tour = null;
+    else goTourStep(cur + 1);
+  },
+  tourPrev: () => {
+    const cur = s.ui.tour?.step ?? 0;
+    if (cur > 0) goTourStep(cur - 1);
+  },
+  tourSkip: () => { s.ui.tour = null; },
 };
 
 export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {

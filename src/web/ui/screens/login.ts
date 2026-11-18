@@ -7,5 +7,6 @@ export const login = (ui: Ui) => html`<form class="login" data-submit="login">
   <input id="code" class="pin" type="text" inputmode="text" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off"
     placeholder="xxxx-xxxx-xxxx" data-f="code" value="${ui.f.code ?? ''}" aria-label="Access code">
   <button class="btn big" type="submit">Let me in</button>
+  <button id="demo-start" class="btn alt" type="button" data-a="startDemo">Try the demo</button>
   <p class="note small">Add the app to your home screen first (Share → Add to Home Screen), then sign in there. The installed app keeps its own login.</p>
 </form>`;

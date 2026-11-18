@@ -44,7 +44,10 @@ export function wire(): void {
   });
   document.addEventListener('keydown', e => {
     const el = e.target as HTMLElement;
-    if (e.key === 'Escape' && s.ui.sheet) { closeSheet(s); commit(); }
+    if (e.key === 'Escape') {
+      if (s.ui.sheet) { closeSheet(s); commit(); }
+      else if (s.ui.tour) { s.ui.tour = null; commit(); }
+    }
     else if (e.key === 'Enter' && el.dataset?.c === 'num') (el as HTMLInputElement).blur();
     else if ((e.key === 'Enter' || e.key === ' ') && el.getAttribute?.('role') === 'button' && el.tagName !== 'LABEL') { e.preventDefault(); el.click(); }
   });

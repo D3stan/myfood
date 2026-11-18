@@ -2,7 +2,7 @@
 import { api, createToken, getData, revokeToken, rotateCode, saveSettings, subscribePush, testPush, unsubscribePush } from '../../api.ts';
 import type { SettingsBody } from '../../../shared/types.ts';
 import { receive, store as s } from '../../store.ts';
-import { afterState, commit, fail, mutate, signedOut, st, toast } from '../helpers.ts';
+import { afterState, commit, exitDemo, fail, mutate, signedOut, st, toast } from '../helpers.ts';
 import { shortcutText } from './shortcuts.ts';
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
@@ -178,5 +178,9 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
     try { await navigator.clipboard.writeText(s.ui.newCode); toast('Access code copied'); }
     catch { toast('Copy failed — select and copy manually'); }
   },
-  logout: async () => { await api('POST', '/api/logout').catch(() => {}); signedOut(); },
+  logout: async () => {
+    if (s.ui.demo) { exitDemo(); return; }
+    await api('POST', '/api/logout').catch(() => {});
+    signedOut();
+  },
 };

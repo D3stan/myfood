@@ -64,6 +64,8 @@ export interface Ui {
   data: DataInfo | null;
   pushSupported: boolean;
   pushPermission: NotificationPermission | 'unsupported';
+  demo: boolean;
+  tour: { step: number } | null;
 }
 
 export interface Store {
@@ -83,6 +85,7 @@ export const newStore = (server: State | null = null, pending: PendingOp[] = [])
     ownerFilter: 'all', historyScope: 'me', spendScope: 'all', frames: {}, stats: { spend: {}, nutrition: {} }, prices: {}, jobMode: 'auto',
     barcodeLookup: null, barcodeBusy: false,
     newToken: null, newCode: null, data: null, pushSupported: false, pushPermission: 'default',
+    demo: false, tour: null,
   },
 });
 
