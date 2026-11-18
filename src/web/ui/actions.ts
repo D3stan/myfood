@@ -103,14 +103,14 @@ function cookStateFor(it: Item | undefined, nowMs: number): {
   };
 }
 
-async function runBarcodeLookup(rawCode: string): Promise<void> {
+async function runBarcodeLookup(rawCode: string, opts?: { refresh?: boolean }): Promise<void> {
   const code = rawCode.trim();
   if (!/^\d{6,14}$/.test(code)) return void toast('Enter 6 to 14 barcode digits');
   if (!navigator.onLine) return void toast("You're offline");
   s.ui.barcodeBusy = true;
   commit();
   try {
-    const lk = await lookupBarcode(code);
+    const lk = await lookupBarcode(code, opts);
     s.ui.barcodeLookup = lk;
     if (s.ui.sheet?.t === 'barcode') s.ui.sheet.q.bc = 1;
     s.ui.f.bcMode = 'pack';
@@ -472,6 +472,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   },
   stopScan: () => stopScanner(s),
   barcodeLookup: () => runBarcodeLookup(s.ui.f.barcodeCode ?? ''),
+  barcodeRefresh: () => runBarcodeLookup(s.ui.barcodeLookup?.code ?? s.ui.f.barcodeCode ?? '', { refresh: true }),
   barcodePhoto: async el => {
     const input = el as HTMLInputElement, file = input.files?.[0];
     input.value = '';

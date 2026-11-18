@@ -586,3 +586,192 @@ test('daily_nutrition value_cents sums eat lines, unpriced counts null ones, a v
   const s2 = await st('POST', '/api/events', { cid: 'dv-eat-2', at: clock - 1000, kind: 'eat', lines: [{ item_id: eggs, qty: 1 }] });
   expect(s2.daily_nutrition[0]).toMatchObject({ value_cents: 1000, unpriced: 1 });
 });
+
+test('barcode lookup hardening: missing quantity keeps 100g macros, parses kJ/serving_size/oz, and uses country locale', async () => {
+  const urls: string[] = [];
+  let responder: (url: string, attempt: number) => Response = () => new Response(JSON.stringify({ status: 0 }), { status: 404 });
+  let calls = 0;
+  vi.stubGlobal('fetch', async (input: unknown) => {
+    urls.push(String(input));
+    calls++;
+    return responder(String(input), calls);
+  });
+  try {
+    // 1. Missing quantity + per-100g macros -> switches from dummy 'pc' to 'g' (or 'ml' for drinks) so macros are kept
+    responder = () => new Response(JSON.stringify({
+      status: 1,
+      product: {
+        product_name: 'Skyr',
+        categories_tags: ['da:mejeri'],
+        nutriments: { 'energy-kj_100g': 251.04, proteins_100g: 11, fat_100g: 0.2, carbohydrates_100g: 3.5 },
+      },
+    }));
+    const skyr = (await defaultBarcodeLookup('5700000000001', { country: 'dk' }))!;
+    expect(urls.at(-1)).toContain('cc=dk');
+    expect(urls.at(-1)).toContain('lc=da');
+    expect(skyr.unit).toBe('g');
+    expect(skyr.pack_size).toBe(100);
+    expect(skyr.category).toBe('dairy');
+    expect(skyr.kcal_per_unit).toBe(0.6);
+    expect(skyr.protein_per_unit).toBe(0.11);
+    expect(skyr.fat_per_unit).toBe(0.002);
+    expect(skyr.carbs_per_unit).toBe(0.035);
+
+    // 2. Drink without quantity infers 'ml' and uses localized product_name_da when country is dk
+    responder = () => new Response(JSON.stringify({
+      status: 1,
+      product: {
+        product_name_en: 'Apple Juice',
+        product_name_da: 'Æblejuice',
+        categories_tags: ['en:beverages'],
+        nutriments: { 'energy-kcal_value': 45, carbohydrates_value: 10.5 },
+      },
+    }));
+    const juice = (await defaultBarcodeLookup('5700000000002', { country: 'dk' }))!;
+    expect(juice.product_name).toBe('Æblejuice');
+    expect(juice.unit).toBe('ml');
+    expect(juice.kcal_per_unit).toBe(0.45);
+    expect(juice.carbs_per_unit).toBe(0.105);
+
+    // 3. Explicit pieces with serving_size string (no serving_quantity) + serving-only g fallback
+    responder = () => new Response(JSON.stringify({
+      status: 1,
+      product: {
+        product_name: 'Crispbread',
+        quantity: '12 stk',
+        serving_size: '1 slice (15 g)',
+        nutriments: { 'energy-kcal_100g': 360, proteins_100g: 10, carbohydrates_100g: 60 },
+      },
+    }));
+    const crisp = (await defaultBarcodeLookup('5700000000003'))!;
+    expect(crisp.unit).toBe('pc');
+    expect(crisp.pack_size).toBe(12);
+    expect(crisp.kcal_per_unit).toBe(54);
+    expect(crisp.protein_per_unit).toBe(1.5);
+    expect(crisp.carbs_per_unit).toBe(9);
+
+    // 4. 12-digit UPC-A retries once on 503 and falls back to zero-padded EAN-13
+    calls = 0;
+    responder = (url, attempt) => {
+      if (attempt === 1) return new Response('busy', { status: 503 });
+      if (url.includes('/123456789052.json')) return new Response('missing', { status: 404 });
+      expect(url).toContain('/0123456789052.json');
+      return new Response(JSON.stringify({
+        status: 1,
+        product: { product_name: 'US Oats', quantity: '16 oz', serving_size: '40 g', nutriments: { 'energy-kcal_serving': 150, proteins_serving: 5 } },
+      }));
+    };
+    const upc = (await defaultBarcodeLookup('123456789052'))!;
+    expect(upc.code).toBe('123456789052');
+    expect(upc.unit).toBe('g');
+    expect(upc.pack_size).toBeCloseTo(453.592, 2);
+    expect(upc.kcal_per_unit).toBe(3.75);
+    expect(upc.protein_per_unit).toBe(0.125);
+
+    // 5. Non-mass serving_quantity_unit (tbsp) falls through to serving_size ("1 tbsp (15 g)"), and 100ml infers ml
+    responder = () => new Response(JSON.stringify({
+      status: 1,
+      product: {
+        product_name: 'Olive Oil',
+        nutrition_data_per: '100ml',
+        nutriments: { 'energy-kcal_100g': 822, fat_100g: 91 },
+      },
+    }));
+    const oil = (await defaultBarcodeLookup('5700000000004'))!;
+    expect(oil.unit).toBe('ml');
+    expect(oil.kcal_per_unit).toBe(8.22);
+    expect(oil.fat_per_unit).toBe(0.91);
+
+    responder = () => new Response(JSON.stringify({
+      status: 1,
+      product: {
+        product_name: 'Peanut Butter',
+        quantity: '350 g',
+        serving_quantity: 1,
+        serving_quantity_unit: 'tbsp',
+        serving_size: '1 tbsp (15 g)',
+        nutriments: { 'energy-kcal_serving': 90, proteins_serving: 3.75 },
+      },
+    }));
+    const pb = (await defaultBarcodeLookup('5700000000005'))!;
+    expect(pb.unit).toBe('g');
+    expect(pb.kcal_per_unit).toBe(6);
+    expect(pb.protein_per_unit).toBe(0.25);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test('barcodes: country setting, ?refresh=1, and incomplete-nutrition TTL revalidate cached entries safely', async () => {
+  barcodeResult = {
+    code: '5709998887771',
+    product_name: 'Rye Bread',
+    brand: 'Kohberg',
+    unit: 'g',
+    pack_size: 500,
+    kcal_per_unit: null,
+    protein_per_unit: null,
+    fat_per_unit: null,
+    carbs_per_unit: null,
+    category: 'bakery',
+    source: 'openfoodfacts',
+  };
+
+  // First lookup caches product with missing nutrition
+  const r1 = (await (await req('GET', '/api/barcodes/5709998887771')).json()) as BarcodeLookup;
+  expect(r1.product?.kcal_per_unit).toBeNull();
+  expect(barcodeCalls).toHaveLength(1);
+
+  // Within TTL without refresh or country change, serves from cache
+  await req('GET', '/api/barcodes/5709998887771');
+  expect(barcodeCalls).toHaveLength(1);
+
+  // After 25h, incomplete nutrition entry expires and re-fetches automatically
+  clock += 25 * 60 * 60 * 1000;
+  barcodeResult = { ...barcodeResult, kcal_per_unit: 2.1, protein_per_unit: 0.06, fat_per_unit: 0.02, carbs_per_unit: 0.39 };
+  const r2 = (await (await req('GET', '/api/barcodes/5709998887771')).json()) as BarcodeLookup;
+  expect(barcodeCalls).toHaveLength(2);
+  expect(r2.product?.kcal_per_unit).toBe(2.1);
+
+  // Complete nutrition stays cached after another 25h, until >30d or ?refresh=1
+  clock += 25 * 60 * 60 * 1000;
+  await req('GET', '/api/barcodes/5709998887771');
+  expect(barcodeCalls).toHaveLength(2);
+
+  barcodeResult = { ...barcodeResult, kcal_per_unit: 2.2 };
+  const r2Refresh = (await (await req('GET', '/api/barcodes/5709998887771?refresh=1')).json()) as BarcodeLookup;
+  expect(barcodeCalls).toHaveLength(3);
+  expect(r2Refresh.product?.kcal_per_unit).toBe(2.2);
+
+  // Changing country setting in /api/settings persists in state and triggers fresh lookup on next scan
+  const sCountry = await st('PATCH', '/api/settings', { country: 'DK' });
+  expect(sCountry.country).toBe('dk');
+  barcodeResult = { ...barcodeResult, product_name: 'Rugbrød' };
+  const r3 = (await (await req('GET', '/api/barcodes/5709998887771')).json()) as BarcodeLookup;
+  expect(barcodeCalls).toHaveLength(4);
+  expect(r3.product?.product_name).toBe('Rugbrød');
+
+  // If a subsequent refresh fails (lookup returns null), cached product is preserved
+  barcodeResult = null;
+  const r4 = (await (await req('GET', '/api/barcodes/5709998887771?refresh=1')).json()) as BarcodeLookup;
+  expect(r4.found).toBe(true);
+  expect(r4.product?.product_name).toBe('Rugbrød');
+  expect((await req('PATCH', '/api/settings', { country: 'invalid' })).status).toBe(400);
+
+  // Cached OFF entry with product_name: null remains visible (found: true)
+  barcodeResult = {
+    code: '5709998887772',
+    product_name: null,
+    brand: 'NoName',
+    unit: 'g',
+    pack_size: 250,
+    kcal_per_unit: 1.5,
+    protein_per_unit: 0.05,
+    category: 'pantry',
+    source: 'openfoodfacts',
+  };
+  await req('GET', '/api/barcodes/5709998887772');
+  const rAnon = (await (await req('GET', '/api/barcodes/5709998887772')).json()) as BarcodeLookup;
+  expect(rAnon.found).toBe(true);
+  expect(rAnon.product?.brand).toBe('NoName');
+});

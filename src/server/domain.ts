@@ -303,6 +303,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     jobs,
     ai: { ready: env.ai },
     currency: getMeta(db, 'currency') ?? 'kr',
+    country: getMeta(db, 'country') ?? '',
     vapid_public_key: getMeta(db, 'vapid_public_key'),
     push_subscribed: hasPushSubscriptions(db, userId),
     tokens: listApiTokens(db, userId),
@@ -1064,8 +1065,12 @@ export function patchMe(db: Db, userId: number, b: MeBody): void {
 }
 
 export function patchSettings(db: Db, b: SettingsBody): void {
+  if (b.currency === undefined && b.country === undefined) {
+    fail(400, 'Provide currency or country');
+  }
   transaction(db, () => {
-    setMeta(db, 'currency', b.currency.trim());
+    if (b.currency !== undefined) setMeta(db, 'currency', b.currency.trim());
+    if (b.country !== undefined) setMeta(db, 'country', b.country.trim().toLowerCase());
     bumpRev(db);
   });
 }

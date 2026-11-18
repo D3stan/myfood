@@ -427,7 +427,7 @@ test('MCP HTTP initialize + tools/list + full item/event/cook/expense/lock lifec
 
   // 7. Barcodes, aliases, settings
   const lookup = parseJsonResult(
-    await client.callTool({ name: 'lookup_barcode', arguments: { code: '5701234567890' } }),
+    await client.callTool({ name: 'lookup_barcode', arguments: { code: '5701234567890', refresh: true } }),
   );
   expect(lookup.found).toBe(true);
   await client.callTool({ name: 'link_barcode', arguments: { code: '5701234567890', item_id: beefId } });
@@ -436,10 +436,11 @@ test('MCP HTTP initialize + tools/list + full item/event/cook/expense/lock lifec
   const settingsRes = parseJsonResult(
     await client.callTool({
       name: 'set_settings',
-      arguments: { currency: 'EUR', notify_low: false },
+      arguments: { currency: 'EUR', country: 'DK', notify_low: false },
     }),
   );
   expect(settingsRes.currency).toBe('EUR');
+  expect(settingsRes.country).toBe('dk');
   expect((settingsRes.user as { notify_low: boolean }).notify_low).toBe(false);
 
   // 8. Expenses & weekly lock enforcement

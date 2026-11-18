@@ -49,12 +49,14 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
   },
   saveSettings: async () => {
     const currency = (s.ui.f.currency ?? st().currency).trim();
+    const country = (s.ui.f.country ?? st().country ?? '').trim().toLowerCase();
     if (!currency) return void toast('Enter a currency');
     if (!navigator.onLine) return void toast("You're offline");
     try {
-      receive(s, await saveSettings({ currency }));
+      receive(s, await saveSettings({ currency, country }));
       delete s.ui.f.currency;
-      toast('Saved currency');
+      delete s.ui.f.country;
+      toast('Saved settings');
       afterState();
     } catch (e) { fail(e); }
   },

@@ -79,6 +79,7 @@ export const fixture: State = {
   ],
   ai: { ready: true },
   currency: 'kr',
+  country: '',
   vapid_public_key: 'BTestVapidPublicKey000000000000000000000000000000000000000000000000000000000000000000000',
   push_subscribed: false,
   tokens: [{ id: 1, name: 'iPhone Siri', prefix: 'mf_test01', scopes: 'shortcut', created_at: now - 86_400_000, last_used_at: null }],

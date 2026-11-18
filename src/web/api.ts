@@ -54,8 +54,8 @@ export const lockExpenses = (body: LockPeriodBody): Promise<State> => api('POST'
 export const exportExpensesUrl = (period: string, format: 'csv' | 'json'): string =>
   `/api/expenses/export?period=${encodeURIComponent(period)}&format=${encodeURIComponent(format)}`;
 
-export const lookupBarcode = (code: string): Promise<BarcodeLookup> =>
-  request<BarcodeLookup>('GET', `/api/barcodes/${encodeURIComponent(code)}`);
+export const lookupBarcode = (code: string, opts?: { refresh?: boolean }): Promise<BarcodeLookup> =>
+  request<BarcodeLookup>('GET', `/api/barcodes/${encodeURIComponent(code)}${opts?.refresh ? '?refresh=1' : ''}`);
 export const linkBarcode = (body: BarcodeLinkBody): Promise<State> => api('POST', '/api/barcodes/link', body);
 
 export const createToken = (body: TokenBody): Promise<{ token: string; info: ApiTokenInfo; state: State }> =>

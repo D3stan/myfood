@@ -543,6 +543,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       const nowMs = now();
       const uid = resolveReadUserId(db, user_id, opts?.defaultUserId, opts?.forcedUserId);
       const currency = getMeta(db, 'currency') ?? 'kr';
+      const country = getMeta(db, 'country') ?? '';
       const rev = getRev(db);
 
       if (uid === null) {
@@ -550,6 +551,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
           rev,
           now: nowMs,
           currency,
+          country,
           me: null,
           users: [],
           items: loadHydratedItems(db, nowMs, false),
@@ -574,6 +576,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         rev: st.rev,
         now: st.now,
         currency: st.currency,
+        country: st.country ?? '',
         me: st.me,
         users: st.users,
         items,
@@ -1267,6 +1270,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
       description: 'Resolve a 6-14 digit barcode against the local barcodes cache and Open Food Facts.',
       inputSchema: {
         code: z.string().trim().regex(/^\d{6,14}$/, 'Barcode must be 6 to 14 digits').describe('6-14 digit EAN/UPC barcode'),
+        refresh: z.boolean().optional().describe('Bypass the local cache and re-query Open Food Facts'),
       },
       annotations: {
         readOnlyHint: false,
@@ -1275,9 +1279,11 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         openWorldHint: true,
       },
     },
-    ({ code }) => runTool(async () => {
+    ({ code, refresh }) => runTool(async () => {
       const nowMs = now();
-      const lookup = await resolveBarcode(db, code, opts?.lookupBarcode ?? defaultBarcodeLookup, nowMs);
+      const lookup = await resolveBarcode(db, code, opts?.lookupBarcode ?? defaultBarcodeLookup, nowMs, {
+        forceRefresh: Boolean(refresh),
+      });
       const item = lookup.item_id != null ? getHydratedItemById(db, lookup.item_id, nowMs) : null;
       return okResult(
         lookup.found
@@ -1369,9 +1375,10 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     'set_settings',
     {
       title: 'Update Household or User Settings',
-      description: 'Update household currency and/or a user notification preferences (notify_low, notify_expiry) and daily nutrition goals (goals: kcal, protein_g, fat_g, carbs_g; null clears one).',
+      description: 'Update household currency/country and/or a user notification preferences (notify_low, notify_expiry) and daily nutrition goals (goals: kcal, protein_g, fat_g, carbs_g; null clears one).',
       inputSchema: {
-        currency: SettingsBody.shape.currency.optional().describe('Household currency code/symbol'),
+        currency: SettingsBody.shape.currency.describe('Household currency code/symbol'),
+        country: SettingsBody.shape.country.describe('ISO 2-letter country code for barcode lookups (e.g. dk, it, us; empty clears)'),
         user_id: z.number().int().positive().optional().describe('User ID when updating notify_low or notify_expiry'),
         notify_low: MeBody.shape.notify_low.describe('Enable/disable low-stock notifications'),
         notify_expiry: MeBody.shape.notify_expiry.describe('Enable/disable expiry notifications'),
@@ -1381,11 +1388,11 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     },
     (args) => runTool(() => {
       const hasUserUpdate = args.notify_low !== undefined || args.notify_expiry !== undefined || args.goals !== undefined;
-      if (args.currency === undefined && !hasUserUpdate) {
-        d.fail(400, 'Provide currency, notify_low, notify_expiry, and/or goals');
+      if (args.currency === undefined && args.country === undefined && !hasUserUpdate) {
+        d.fail(400, 'Provide currency, country, notify_low, notify_expiry, and/or goals');
       }
-      if (args.currency !== undefined) {
-        d.patchSettings(db, SettingsBody.parse({ currency: args.currency }));
+      if (args.currency !== undefined || args.country !== undefined) {
+        d.patchSettings(db, SettingsBody.parse(stripUndefined({ currency: args.currency, country: args.country })));
       }
       let updatedUser: { id: number; name: string; emoji: string; notify_low: boolean; notify_expiry: boolean } | null = null;
       if (hasUserUpdate) {
@@ -1415,8 +1422,10 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         };
       }
       const currency = getMeta(db, 'currency') ?? 'kr';
-      return okResult(`Updated settings (currency=${currency}).`, {
+      const country = getMeta(db, 'country') ?? '';
+      return okResult(`Updated settings (currency=${currency}, country=${country || 'auto'}).`, {
         currency,
+        country,
         user: updatedUser,
         rev: getRev(db),
       });

@@ -217,6 +217,7 @@ describe('v2 sheets and helpers', () => {
     const fields = barcodeToFields(lkUnmatched);
     expect(fields.bcKcal).toBe('46');
     expect(fields.bcProtein).toBe('1');
+    expect(fields.bcEmoji).toBe('🥤');
     s.ui.barcodeLookup = lkUnmatched;
     s.ui.f = { ...s.ui.f, ...fields, barcodeCode: '5701234567890' };
     openSheet(s, { t: 'barcode', q: { bc: 1 } }); // the app opens with 1
@@ -226,6 +227,13 @@ describe('v2 sheets and helpers', () => {
     expect(outUnmatched).toContain('Ask the AI instead');
     expect(outUnmatched).toContain('Create &amp; Add');
     expect(outUnmatched).toContain('Or link to existing item');
+    expect(outUnmatched).toContain('data-a="barcodeRefresh"');
+
+    s.ui.barcodeLookup = {
+      ...lkUnmatched,
+      product: { ...lkUnmatched.product!, kcal_per_unit: null, protein_per_unit: null },
+    };
+    expect(sheetHtml(s)).toContain('no nutrition data');
 
     s.ui.barcodeLookup = { ...lkUnmatched, item_id: 1 };
     const outMatched = sheetHtml(s);

@@ -355,7 +355,9 @@ export function createApp(deps: Deps): Hono<Env> {
 
   // ---- barcodes ----
   app.get('/api/barcodes/:code', async c => {
-    const lookup = await resolveBarcode(db, c.req.param('code'), deps.lookupBarcode, now());
+    const refresh = c.req.query('refresh');
+    const forceRefresh = refresh === '1' || refresh === 'true';
+    const lookup = await resolveBarcode(db, c.req.param('code'), deps.lookupBarcode, now(), { forceRefresh });
     return c.json(lookup);
   });
   app.post('/api/barcodes/link', async c => {

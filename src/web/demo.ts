@@ -520,6 +520,7 @@ export function createDemoState(now = Date.now()): State {
     jobs,
     ai: { ready: true },
     currency: 'kr',
+    country: '',
     vapid_public_key: null,
     push_subscribed: false,
     tokens: [
@@ -1112,7 +1113,8 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
 
     if (method === 'PATCH' && path === '/api/settings') {
       const b = body as SettingsBody;
-      st.currency = b.currency.trim();
+      if (b.currency !== undefined) st.currency = b.currency.trim();
+      if (b.country !== undefined) st.country = b.country.trim().toLowerCase();
       return bump();
     }
 
@@ -1145,7 +1147,8 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
     }
 
     if (method === 'GET' && path.startsWith('/api/barcodes/')) {
-      const code = decodeURIComponent(path.slice('/api/barcodes/'.length));
+      const codePart = path.slice('/api/barcodes/'.length).split('?')[0] ?? '';
+      const code = decodeURIComponent(codePart);
       const linkedId = barcodeMap.get(code);
       if (linkedId != null && st.items.some(i => i.id === linkedId)) {
         return { found: true, code, item_id: linkedId, product: null } satisfies BarcodeLookup;
