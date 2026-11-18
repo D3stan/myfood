@@ -144,7 +144,6 @@ textarea{resize:none}
 .seg button{background:none;border:0;border-right:2px solid var(--ink);padding:6px 12px;min-height:38px;font-size:.95rem;color:var(--muted);cursor:pointer}
 .seg button:last-child{border-right:0}
 .seg button.on{background:var(--ink);color:var(--gold)}
-.viewfinder{width:100%;max-height:240px;object-fit:cover;border:3px solid var(--ink);border-radius:var(--wob);background:#000;margin:8px 0}
 .spend-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:var(--paper);border:2px solid var(--ink);padding:8px 10px;margin-bottom:8px;box-shadow:2px 2px 0 var(--ink);cursor:pointer}
 .spend-row .cost{font-family:"Permanent Marker",cursive;white-space:nowrap;margin-left:auto}
 .lock-pill{display:inline-flex;align-items:center;gap:4px;background:var(--green-bg);border:2px solid var(--ink);padding:4px 10px;font-size:.9rem;border-radius:999px}

@@ -1,29 +1,32 @@
-import type { Context, Hono } from 'hono';
-import type { ZodType } from 'zod';
+import type { Hono } from 'hono';
 import { ExpenseBody, LockPeriodBody } from '../../shared/types.ts';
-import type { State } from '../../shared/types.ts';
-import type { Db } from '../db.ts';
 import { fail } from '../domain.ts';
-import { addExpense, exportExpenses, lockExpensePeriod } from './repo.ts';
-
-export interface SpendRouteDeps {
-  db: Db;
-  now: () => number;
-  state: (uid: number) => State;
-  json: (c: Context) => Promise<unknown>;
-  parse: <T>(schema: ZodType<T>, data: unknown) => T;
-}
+import { statsRange } from '../route-kit.ts';
+import type { AppEnv, RouteDeps } from '../route-kit.ts';
+import { addExpense, exportExpenses, lockExpensePeriod, settleUp, spendStats, unlockExpensePeriod } from './repo.ts';
 
 export function registerSpendRoutes(
-  app: Hono<{ Variables: { uid: number } }>,
-  { db, now, state, json, parse }: SpendRouteDeps,
+  app: Hono<AppEnv>,
+  { db, now, state, json, parse }: RouteDeps,
 ): void {
+  app.get('/api/stats/spend', c => {
+    const { from, to } = statsRange(c, parse);
+    return c.json(spendStats(db, from, to));
+  });
   app.post('/api/expenses', async c => {
     addExpense(db, c.get('uid'), parse(ExpenseBody, await json(c)), now());
     return c.json(state(c.get('uid')));
   });
   app.post('/api/expenses/lock', async c => {
     lockExpensePeriod(db, c.get('uid'), parse(LockPeriodBody, await json(c)), now());
+    return c.json(state(c.get('uid')));
+  });
+  app.delete('/api/expenses/lock/:period', c => {
+    unlockExpensePeriod(db, parse(LockPeriodBody.shape.period, c.req.param('period')));
+    return c.json(state(c.get('uid')));
+  });
+  app.post('/api/settle', c => {
+    settleUp(db, c.get('uid'), null, now());
     return c.json(state(c.get('uid')));
   });
   app.get('/api/expenses/export', c => {

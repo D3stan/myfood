@@ -2,7 +2,7 @@
 // node scripts/seed.ts --rotate <name>  new access code for an existing user; their sessions end
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { deleteUserSessions, newCode, sha256 } from '../src/server/auth.ts';
+import { newCode, rotateCode, sha256 } from '../src/server/auth.ts';
 import { openDb } from '../src/server/db.ts';
 import type { Db } from '../src/server/db.ts';
 import { get, run } from '../src/server/db.ts';
@@ -61,10 +61,7 @@ if (rotate) {
   for (const name of names) {
     const u = get<{ id: number }>(db, 'SELECT id FROM users WHERE name = ?', name);
     if (!u) { console.error(`No user called ${name}`); process.exitCode = 1; continue; }
-    const code = newCode();
-    run(db, 'UPDATE users SET code_hash = ? WHERE id = ?', sha256(code), u.id);
-    deleteUserSessions(db, u.id);
-    console.log(`${name}: ${code}   (shown once, it cannot be looked up later)`);
+    console.log(`${name}: ${rotateCode(db, u.id)}   (shown once, it cannot be looked up later)`);
   }
 } else {
   let first: number | null = null;

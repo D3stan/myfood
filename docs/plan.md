@@ -189,7 +189,7 @@ State: `{ rev, build, now, me, users, items[+stock], presets, usual, events (las
 
 - One household, no sign-up. `scripts/seed.ts` creates the two users and prints a
   random access code for each (`xxxx-xxxx-xxxx`, about 60 bits). The code is typed
-  once; it both identifies and authenticates. Stored as SHA-256.
+  once; it both identifies and authenticates. Stored as SHA-256. A new code can be issued with `node scripts/seed.ts --rotate <name>` or from Settings → Profile; the old code and sessions stop working.
 - Session token: 32 random bytes, stored hashed, cookie `HttpOnly; Secure;
   SameSite=Lax`, one year, renewed on use.
 - Login throttle: 5 failures per minute per client, keyed on `CF-Connecting-IP`

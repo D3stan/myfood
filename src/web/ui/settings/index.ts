@@ -1,7 +1,8 @@
 import { html } from '../../html.ts';
 import type { Html } from '../../html.ts';
 import type { V } from '../components/bits.ts';
-import { goals } from './goals.ts';
+import { data } from './data.ts';
+import { goals } from '../nutrition/goals.ts';
 import { household } from './household.ts';
 import { mcp } from './mcp.ts';
 import { presets } from './presets.ts';
@@ -17,9 +18,10 @@ export const PAGES: Record<string, { title: string; render: (v: V) => Html }> = 
   presets: { title: 'Presets', render: presets },
   siri: { title: 'Siri Shortcut', render: siri },
   mcp: { title: 'MCP', render: mcp },
+  data: { title: 'Data', render: data },
 };
 
-const rows: [string, string][] = [['profile', 'Profile'], ['goals', 'Nutrition goals'], ['household', 'Household'], ['presets', 'Presets'], ['siri', 'Siri Shortcut'], ['mcp', 'MCP']];
+const rows: [string, string][] = [['profile', 'Profile'], ['goals', 'Nutrition goals'], ['household', 'Household'], ['presets', 'Presets'], ['siri', 'Siri Shortcut'], ['mcp', 'MCP'], ['data', 'Data']];
 
 function settings() {
   return html`

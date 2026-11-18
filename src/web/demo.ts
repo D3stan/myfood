@@ -1,6 +1,7 @@
 // Seeded relative-time state and full local fake API for interactive demo mode.
 import { addDays, isoDate, isoWeek, weekRange } from '../shared/dates.ts';
 import { computeDailyNutrition } from '../shared/nutrition.ts';
+import { paidRows } from '../shared/spend.ts';
 import { applyOps, nextStock, toLines } from '../shared/stock.ts';
 import { nameKey } from '../shared/text.ts';
 import { CATEGORIES } from '../shared/types.ts';
@@ -12,6 +13,7 @@ import type {
   BarcodeLinkBody,
   BarcodeLookup,
   CookBody,
+  DataInfo,
   EventBody,
   EventLine,
   EventPatch,
@@ -20,17 +22,52 @@ import type {
   Item,
   ItemBody,
   ItemPatch,
+  ItemPrice,
   Job,
   JobMode,
   LockPeriodBody,
   MeBody,
+  NutritionStats,
   Preset,
   PresetBody,
   SettingsBody,
+  Settle,
+  SpendStats,
   State,
   TokenBody,
 } from '../shared/types.ts';
 import { ApiError } from './api.ts';
+
+function computeDemoSettle(
+  users: { id: number }[],
+  events: FoodEvent[],
+  since: number | null,
+): Settle {
+  const from = since ?? 0;
+  let unpriced = 0;
+  const paidBy = new Map<number, number>();
+  const ateBy = new Map<number, number>();
+  for (const e of events) {
+    if (e.at <= from) continue;
+    if (e.cost_cents != null) paidBy.set(e.user_id, (paidBy.get(e.user_id) ?? 0) + e.cost_cents);
+    if (e.kind === 'eat' && e.counts_nutrition) {
+      for (const l of e.lines) {
+        if (l.is_set) continue;
+        if (l.value_cents == null) unpriced += 1;
+        else ateBy.set(e.user_id, (ateBy.get(e.user_id) ?? 0) + l.value_cents);
+      }
+    }
+  }
+  return {
+    since,
+    unpriced,
+    balances: users.map(u => {
+      const paid_cents = paidBy.get(u.id) ?? 0;
+      const ate_cents = ateBy.get(u.id) ?? 0;
+      return { user_id: u.id, paid_cents, ate_cents, balance_cents: paid_cents - ate_cents };
+    }),
+  };
+}
 
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
@@ -488,6 +525,11 @@ export function createDemoState(now = Date.now()): State {
 
   const build = typeof __BUILD__ !== 'undefined' ? __BUILD__ : 'dev';
 
+  const users = [
+    { id: 1, name: 'Sam', emoji: '🦊' },
+    { id: 2, name: 'Robin', emoji: '🐻' },
+  ];
+
   return {
     rev: 1,
     build,
@@ -500,10 +542,7 @@ export function createDemoState(now = Date.now()): State {
       notify_expiry: true,
       goals: { kcal: 2200, protein_g: 140, fat_g: 70, carbs_g: 240 },
     },
-    users: [
-      { id: 1, name: 'Sam', emoji: '🦊' },
-      { id: 2, name: 'Robin', emoji: '🐻' },
-    ],
+    users,
     items,
     presets,
     usual: {
@@ -519,7 +558,7 @@ export function createDemoState(now = Date.now()): State {
     events,
     jobs,
     ai: { ready: true },
-    currency: 'kr',
+    currency: 'DKK',
     vapid_public_key: null,
     push_subscribed: false,
     tokens: [
@@ -542,6 +581,7 @@ export function createDemoState(now = Date.now()): State {
         note: null,
       },
     ],
+    settle: computeDemoSettle(users, events, null),
     expenses,
     daily_nutrition,
     guest_code: 'demo-2026',
@@ -657,12 +697,15 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
   let nextTokenId = Math.max(0, ...st.tokens.map(t => t.id)) + 1;
   const barcodeMap = new Map<string, number>();
   const setBefore = new Map<string, Map<number, number>>();
+  const archivedItems = new Map<number, { item: Item; archived_at: number }>();
+  let settleSince: number | null = st.settle.since;
 
   const syncDerived = () => {
     st.items = sortItems(st.items);
     st.events.sort((a, b) => b.at - a.at);
     st.expenses = st.events.filter(e => e.cost_cents != null);
     st.daily_nutrition = computeDailyNutrition(st.events, st.items, []);
+    st.settle = computeDemoSettle(st.users, st.events, settleSince);
   };
   const bump = () => { st.rev += 1; st.now = Date.now(); syncDerived(); return structuredClone(st); };
   const assertUnlocked = (at: number) => {
@@ -891,6 +934,8 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
 
     if (method === 'DELETE' && path.startsWith('/api/items/')) {
       const id = Number(path.slice('/api/items/'.length));
+      const archived = st.items.find(i => i.id === id);
+      if (archived) archivedItems.set(id, { item: archived, archived_at: Date.now() });
       st.items = st.items.filter(i => i.id !== id);
       st.presets = st.presets
         .map(p => ({ ...p, lines: p.lines.filter(l => l.item_id !== id) }))
@@ -1112,8 +1157,87 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
 
     if (method === 'PATCH' && path === '/api/settings') {
       const b = body as SettingsBody;
-      st.currency = b.currency.trim();
+      st.currency = b.currency;
       return bump();
+    }
+
+    if (method === 'POST' && path === '/api/settle') {
+      settleSince = Date.now();
+      return bump();
+    }
+
+    if (method === 'DELETE' && path.startsWith('/api/expenses/lock/')) {
+      const period = decodeURIComponent(path.slice('/api/expenses/lock/'.length));
+      st.expense_locks = st.expense_locks.filter(l => l.period !== period);
+      return bump();
+    }
+
+    if (method === 'GET' && path === '/api/data') {
+      return {
+        aliases: [],
+        archived: [...archivedItems.values()].map(({ item, archived_at }) => ({
+          id: item.id,
+          name: item.name,
+          emoji: item.emoji,
+          archived_at,
+        })),
+      } satisfies DataInfo;
+    }
+
+    if (method === 'POST' && path.startsWith('/api/items/') && path.endsWith('/restore')) {
+      const id = Number(path.slice('/api/items/'.length, -'/restore'.length));
+      const entry = archivedItems.get(id);
+      if (entry) {
+        archivedItems.delete(id);
+        st.items.push(entry.item);
+      }
+      return bump();
+    }
+
+    if (method === 'GET' && path.startsWith('/api/items/') && path.endsWith('/prices')) {
+      const id = Number(path.slice('/api/items/'.length, -'/prices'.length));
+      const prices: ItemPrice[] = [];
+      for (const e of st.events) {
+        if (e.kind !== 'buy') continue;
+        for (const l of e.lines) {
+          if (l.item_id === id && l.cost_cents != null && l.qty > 0) {
+            prices.push({ at: e.at, unit_cents: Math.round((l.cost_cents / l.qty) * 100) / 100 });
+          }
+        }
+      }
+      return prices;
+    }
+
+    if (method === 'DELETE' && path.startsWith('/api/aliases/')) {
+      return bump();
+    }
+
+    if (method === 'GET' && path.startsWith('/api/stats/')) {
+      const url = new URL(path, 'http://demo.local');
+      const from = url.searchParams.get('from') ?? '';
+      const to = url.searchParams.get('to') ?? '';
+      if (url.pathname === '/api/stats/spend') {
+        const paidEvents = st.expenses.filter(e => (e.cost_cents ?? 0) > 0 && isoDate(e.at) >= from && isoDate(e.at) <= to);
+        return {
+          from,
+          to,
+          paid: paidRows(paidEvents),
+          ate: st.daily_nutrition
+            .filter(d => d.day >= from && d.day <= to && (d.value_cents > 0 || d.unpriced > 0))
+            .map(({ day, user_id, value_cents, unpriced }) => ({ day, user_id, value_cents, unpriced })),
+        } satisfies SpendStats;
+      }
+      if (url.pathname === '/api/stats/nutrition') {
+        return {
+          from,
+          to,
+          rows: st.daily_nutrition.filter(d => d.user_id === st.me.id && d.day >= from && d.day <= to),
+        } satisfies NutritionStats;
+      }
+    }
+
+    if (method === 'POST' && path === '/api/me/code') {
+      return { code: 'demo-code-2026', state: bump() };
     }
 
     if (method === 'POST' && path === '/api/guest/code') {

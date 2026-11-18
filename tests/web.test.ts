@@ -5,10 +5,12 @@ import { html, htmlToString } from '../src/web/html.ts';
 import { flush } from '../src/web/outbox.ts';
 import { isoDate } from '../src/shared/dates.ts';
 import { applyOps } from '../src/shared/stock.ts';
+import { fmtCost } from '../src/shared/text.ts';
 import type { BarcodeLookup, PendingOp, State } from '../src/shared/types.ts';
 import { enqueueEvent, enqueueUndo, newStore, openSheet, qOf, receive, setQ, stepQ, store as singletonStore, view } from '../src/web/store.ts';
-import { actions, findCreatedItem, overdrawWarning, visibleLowItems } from '../src/web/ui/actions.ts';
-import { barcodeToFields, bcModeOf, bcTotal, stopScanner } from '../src/web/ui/components/barcode.ts';
+import { actions } from '../src/web/ui/actions.ts';
+import { findCreatedItem, overdrawWarning, visibleLowItems } from '../src/web/ui/logging.ts';
+import { barcodeToFields, bcModeOf, bcTotal } from '../src/web/ui/components/barcode.ts';
 import { cookBatchMacros } from '../src/web/ui/components/cook.ts';
 import { itemToFields, macroBasis } from '../src/web/ui/components/sheets.ts';
 import { appHtml, sheetHtml, toastHtml } from '../src/web/ui/render.ts';
@@ -208,7 +210,7 @@ describe('v2 sheets and helpers', () => {
     expect(rev).toContain('Apply adjustments');
   });
 
-  test('barcodeSheet fallback, matched/unmatched states, and stopScanner cleanup', () => {
+  test('barcodeSheet fallback, matched/unmatched states, and no live preview', () => {
     const s = fresh();
     const lkUnmatched: BarcodeLookup = {
       found: true, code: '5701234567890', item_id: null,
@@ -221,8 +223,11 @@ describe('v2 sheets and helpers', () => {
     s.ui.f = { ...s.ui.f, ...fields, barcodeCode: '5701234567890' };
     openSheet(s, { t: 'barcode', q: { bc: 1 } }); // the app opens with 1
     const outUnmatched = sheetHtml(s);
-    expect(outUnmatched).toContain('Photo of the barcode');
-    expect(outUnmatched).toContain('data-c="barcodePhoto"');
+    expect(outUnmatched).toContain('data-a="barcodeCamera"');
+    expect(outUnmatched).toContain('Upload photo');
+    expect(outUnmatched).toMatch(/<input id="f-bcPhoto" type="file" accept="image\/\*" data-c="barcodePhoto"/);
+    expect(outUnmatched).not.toContain('capture=');
+    expect(outUnmatched).not.toContain('<video');
     expect(outUnmatched).toContain('Ask the AI instead');
     expect(outUnmatched).toContain('Create &amp; Add');
     expect(outUnmatched).toContain('Or link to existing item');
@@ -231,10 +236,6 @@ describe('v2 sheets and helpers', () => {
     const outMatched = sheetHtml(s);
     expect(outMatched).toContain('Add 10 pc'); // default: 1 pack of 10
     expect(outMatched).toContain('Packs (10 pc)');
-
-    s.ui.scannerActive = true;
-    stopScanner(s);
-    expect(s.ui.scannerActive).toBe(false);
   });
 
   test('expenseSheet and spend screen render weekly expenses and locks', () => {
@@ -248,11 +249,33 @@ describe('v2 sheets and helpers', () => {
     s.ui.tab = 'spend';
     const spendOut = appHtml(s, new Date(fixture.now));
     expect(spendOut).toContain('REMA 1000');
-    expect(spendOut).toContain('124.50 kr');
+    expect(spendOut).toContain('124,50\u00a0kr.');
     expect(spendOut).toContain('data-a="lockWeek"');
     expect(spendOut).toContain('data-a="exportExpenses"');
     s.ui.frames.spend = { frame: 'week', offset: -1 }; // the locked week
     expect(appHtml(s, new Date(fixture.now))).toContain('Locked');
+  });
+
+  test('spend screen shows the settle-up card: transfers, unpriced note, and the settle button', () => {
+    const s = fresh();
+    s.ui.tab = 'spend';
+    s.server!.settle = {
+      since: new Date(2026, 10, 3, 12).getTime(),
+      balances: [{ user_id: 1, paid_cents: 20000, ate_cents: 7700, balance_cents: 12300 }, { user_id: 2, paid_cents: 0, ate_cents: 12300, balance_cents: -12300 }],
+      unpriced: 3,
+    };
+    const out = appHtml(s, new Date(fixture.now));
+    expect(out).toMatch(/id="settle"[\s\S]*since 3 Nov/);
+    const u = s.server!.users;
+    expect(out).toContain(`${u[1]!.emoji} ${u[1]!.name} → ${u[0]!.emoji} ${u[0]!.name}`);
+    expect(out).toMatch(/123\s?kr\./);
+    expect(out).toContain('3 eaten items had no price');
+    expect(out).toContain('data-a="settleUp"');
+    s.server!.settle = { since: null, balances: [], unpriced: 0 };
+    const sq = appHtml(s, new Date(fixture.now));
+    expect(sq).toContain('since the start');
+    expect(sq).toContain('All square');
+    expect(sq).not.toContain('had no price');
   });
 
   test('visibleLowItems excludes other users personal items and findCreatedItem matches owner_id + nameKey', () => {
@@ -451,6 +474,21 @@ describe('v2 sheets and helpers', () => {
   });
 });
 
+describe('item price history', () => {
+  test('the item sheet lists cached buys with the per-basis price, newest first, and nothing when empty', () => {
+    const s = fresh();
+    const g = fixture.items.find(i => i.id === 4)!; // g item: basis 100g
+    openSheet(s, { t: 'item', id: g.id, q: { main: 1 } }, itemToFields(g));
+    expect(sheetHtml(s)).not.toContain('Price history');
+    s.ui.prices[g.id] = [{ at: new Date(2026, 10, 14, 12).getTime(), unit_cents: 0.8 }, { at: new Date(2026, 9, 2, 12).getTime(), unit_cents: 0.75 }];
+    const out = sheetHtml(s);
+    expect(out).toContain('Price history');
+    expect(out).toContain(`${fmtCost(80, fixture.currency)} / 100g`);
+    expect(out).toContain(`${fmtCost(75, fixture.currency)} / 100g`);
+    expect(out.indexOf('2026-11-14')).toBeLessThan(out.indexOf('2026-10-02'));
+  });
+});
+
 describe('item price field', () => {
   test('per-unit price shows per macro basis, empty = unknown, and saves back as per-unit cents', async () => {
     const beef = { ...fixture.items.find(i => i.id === 4)!, cost_per_unit_cents: 0.8 }; // g item: 0.8 cents/g
@@ -469,7 +507,15 @@ describe('item price field', () => {
       singletonStore.server = structuredClone(fixture);
       openSheet(singletonStore, { t: 'item', id: 4, q: { main: 1 } }, itemToFields(beef));
       await actions.saveItem!({ dataset: {} } as unknown as HTMLElement);
-      expect(sent!.cost_per_unit_cents).toBe(0.8);
+      expect(sent!.cost_per_unit_cents).toBe(0.8); // stored price was null, field now shows one: changed
+      // re-saving an untouched, rounded display must not resend (and so round) the stored price
+      singletonStore.server!.items.find(i => i.id === 4)!.cost_per_unit_cents = 0.8333;
+      sent = undefined;
+      openSheet(singletonStore, { t: 'item', id: 4, q: { main: 1 } }, itemToFields(singletonStore.server!.items.find(i => i.id === 4)!));
+      await actions.saveItem!({ dataset: {} } as unknown as HTMLElement);
+      expect(sent).toBeDefined();
+      expect('cost_per_unit_cents' in sent!).toBe(false);
+      singletonStore.server!.items.find(i => i.id === 4)!.cost_per_unit_cents = 0.8; // clearing a known price is a change
       openSheet(singletonStore, { t: 'item', id: 4, q: { main: 1 } }, { ...itemToFields(beef), itemPrice: '' });
       await actions.saveItem!({ dataset: {} } as unknown as HTMLElement);
       expect(sent!.cost_per_unit_cents).toBeNull();
@@ -576,6 +622,33 @@ describe('siri shortcuts and guest card', () => {
     expect(hh).toContain('data-a="newGuestCode"');
     expect(hh).toContain('data-a="saveSettings"');
   });
+  test('Data page: locks, archived items, receipt names, AI status; Profile has the new-code button', () => {
+    const s = fresh();
+    s.server!.expense_locks = [{ period: '2026-W45', locked_by: 1, locked_at: fixture.now, total_cents: 5000, event_count: 3, note: 'Settled' }];
+    s.server!.ai = { ready: false };
+    s.server!.jobs = [{ id: 7, mode: 'auto', status: 'failed', text: '', has_images: false, error: 'The AI took too long. Try again.', event_cids: [], created_at: fixture.now } as unknown as State['jobs'][number]];
+    s.ui.page = ['settings'];
+    expect(appHtml(s)).toContain('data-p="data"');
+    s.ui.page = ['data'];
+    let out = appHtml(s);
+    expect(out).toContain('id="lock-2026-W45"');
+    expect(out).toContain('data-a="unlockWeek" data-p="2026-W45"');
+    expect(out).toContain('Not working');
+    expect(out).toContain('The AI took too long');
+    expect(out).toContain('Loading…'); // /api/data not back yet
+    s.ui.data = { archived: [{ id: 5, name: 'Old jam', emoji: '🍓', archived_at: fixture.now }], aliases: [{ text: 'hakket oksekod', item_id: 4, item_name: 'Beef', emoji: '🥩' }] };
+    out = appHtml(s);
+    expect(out).toContain('id="archived-5"');
+    expect(out).toContain('data-a="restoreItem" data-id="5"');
+    expect(out).toContain('data-a="delAlias" data-text="hakket oksekod"');
+    expect(out).toContain('→ 🥩 Beef');
+    s.server!.ai = { ready: null };
+    expect(appHtml(s)).toContain('Not used yet');
+    s.ui.page = ['profile'];
+    expect(appHtml(s)).toContain('data-a="newAccessCode"');
+    s.ui.newCode = 'abcd-efgh-jkmn';
+    expect(appHtml(s)).toContain('abcd-efgh-jkmn');
+  });
   test('MCP page: own row, tokens filtered per page, connector URL shown once, create sends scope mcp', async () => {
     const s = fresh();
     s.server!.tokens.push({ id: 2, name: 'Claude', prefix: 'mf_mcp001', scopes: 'mcp', created_at: 0, last_used_at: null });
@@ -663,7 +736,7 @@ describe('siri shortcuts and guest card', () => {
     } finally { fetchSpy.mockRestore(); vi.unstubAllGlobals(); delete s.ui.f.goal_kcal; }
   });
   describe('Today card on Me', () => {
-    const day = (user_id: number, kcal: number, carbs_g: number | null = 100) => ({ day: isoDate(Date.now()), user_id, kcal, protein_g: 50, fat_g: 30, carbs_g, value_cents: 0, unpriced: 0 });
+    const day = (user_id: number, kcal: number, carbs_g: number | null = 100, no_kcal = 0) => ({ day: isoDate(fixture.now), user_id, kcal, protein_g: 50, fat_g: 30, carbs_g, value_cents: 0, unpriced: 0, no_kcal });
     const meHtml = (goals: Partial<State['me']['goals']>, daily: State['daily_nutrition']) => {
       const s = fresh();
       s.server!.me.goals = { kcal: null, protein_g: null, fat_g: null, carbs_g: null, ...goals };
@@ -692,6 +765,23 @@ describe('siri shortcuts and guest card', () => {
     });
     test('carbs null shows a dash', () => {
       expect(meHtml({ carbs_g: 200 }, [day(1, 500, null)])).toContain('—');
+    });
+    test('items without kcal get a muted hint on Today and the trend card', () => {
+      const out = meHtml({}, [day(1, 700, 100, 2)]);
+      expect(out.match(/2 items without kcal/g)).toHaveLength(2);
+      expect(meHtml({}, [day(1, 700)])).not.toContain('without kcal');
+    });
+    test('trend averages read label, number, unit', () => {
+      const out = meHtml({}, [day(1, 700)]);
+      expect(out).toMatch(/>P<\/span> <b>50<\/b> <span class="muted small">g</);
+      expect(out).toMatch(/>kcal<\/span> <b>700<\/b>/);
+    });
+    test('Today follows the server clock, not the phone', () => {
+      const s = fresh();
+      s.server!.daily_nutrition = [day(1, 1111)];
+      s.server!.now = fixture.now + 3 * 86_400_000;
+      s.ui.tab = 'me';
+      expect(appHtml(s)).not.toContain('1,111');
     });
     test('only the signed-in user counts', () => {
       const out = meHtml({}, [day(1, 700), day(2, 900)]);

@@ -1,6 +1,5 @@
 // Delegated listeners: data-a = action on click, data-c = action on change, data-f = a text field, data-submit = a form.
 import { actions, commit, toast } from './actions.ts';
-import { stopScanner } from './components/barcode.ts';
 import { closeSheet, store as s } from '../store.ts';
 
 async function run(name: string | undefined, el: HTMLElement): Promise<void> {
@@ -46,7 +45,7 @@ export function wire(): void {
   document.addEventListener('keydown', e => {
     const el = e.target as HTMLElement;
     if (e.key === 'Escape') {
-      if (s.ui.sheet) { stopScanner(s); closeSheet(s); commit(); }
+      if (s.ui.sheet) { closeSheet(s); commit(); }
       else if (s.ui.tour) { s.ui.tour = null; commit(); }
     }
     else if (e.key === 'Enter' && el.dataset?.c === 'num') (el as HTMLInputElement).blur();

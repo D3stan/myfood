@@ -30,6 +30,10 @@ export function addDays(base: string | number | Date, days: number): string {
   return isoDate(d);
 }
 
+/** Local-midnight bounds of inclusive ISO dates: [from 00:00, day after `to` 00:00). */
+export const dayRangeMs = (from: string, to: string): { fromMs: number; toMs: number } =>
+  ({ fromMs: parseIsoDate(from)!.getTime(), toMs: parseIsoDate(addDays(to, 1))!.getTime() });
+
 /** Whole local calendar days from `now` until `yyyyMmDd` (negative = expired, 0 = today). */
 export function daysUntil(yyyyMmDd: string, now: number | Date = Date.now()): number {
   const target = parseIsoDate(yyyyMmDd);

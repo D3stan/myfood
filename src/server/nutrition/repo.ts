@@ -6,7 +6,8 @@ import type { Db } from '../db.ts';
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
-export function dailyNutrition(db: Db, fromMs: number, userId?: number): DailyNutrition[] {
+/** Counted eat lines per day and user from `fromMs` (inclusive) to `toMs` (exclusive, default now and later). */
+export function dailyNutrition(db: Db, fromMs: number, userId?: number, toMs?: number): DailyNutrition[] {
   const dailyMap = new Map<string, DailyNutrition>();
   for (const r of all<{
     at: number;
@@ -29,8 +30,10 @@ export function dailyNutrition(db: Db, fromMs: number, userId?: number): DailyNu
      FROM event_lines l
      JOIN events e ON e.cid = l.event_cid
      JOIN items i ON i.id = l.item_id
-     WHERE e.undone_at IS NULL AND e.kind = 'eat' AND e.counts_nutrition = 1 AND e.at >= ?${userId !== undefined ? ' AND e.user_id = ?' : ''}`,
-    ...(userId !== undefined ? [fromMs, userId] : [fromMs]),
+     WHERE e.undone_at IS NULL AND e.kind = 'eat' AND e.counts_nutrition = 1 AND e.at >= ?${userId !== undefined ? ' AND e.user_id = ?' : ''}${toMs !== undefined ? ' AND e.at < ?' : ''}`,
+    fromMs,
+    ...(userId !== undefined ? [userId] : []),
+    ...(toMs !== undefined ? [toMs] : []),
   )) {
     if (r.is_set) continue;
     const n = eventLineNutrition(
@@ -41,8 +44,9 @@ export function dailyNutrition(db: Db, fromMs: number, userId?: number): DailyNu
     const day = isoDate(r.at);
     const key = `${day}:${r.user_id}`;
     let cur = dailyMap.get(key);
-    if (!cur) dailyMap.set(key, cur = { day, user_id: r.user_id, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 0 });
+    if (!cur) dailyMap.set(key, cur = { day, user_id: r.user_id, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 0, no_kcal: 0 });
     // Value counts even for a line with no macros; macros keep the old skip.
+    if (r.kcal == null && r.kcal_per_unit == null) cur.no_kcal++;
     if (r.value_cents == null) cur.unpriced++; else cur.value_cents += r.value_cents;
     if (!hasMacros) continue;
     cur.kcal = Math.round(cur.kcal + n.kcal);
