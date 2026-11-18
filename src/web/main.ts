@@ -10,20 +10,21 @@ import { useFake } from './api.ts';
 import { load } from './outbox.ts';
 import { store as s } from './store.ts';
 import { commit, hooks, pump, refresh } from './ui/actions.ts';
+import { enterDemo } from './ui/helpers.ts';
 import { wire } from './ui/events.ts';
 
-const saved = load();
-s.server = saved.server;
-s.pending = saved.pending;
 s.ui.online = navigator.onLine;
 s.ui.standalone = (navigator as Navigator & { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
 s.ui.pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 s.ui.pushPermission = s.ui.pushSupported ? Notification.permission : 'unsupported';
 s.ui.scannerSupported = 'BarcodeDetector' in window;
 
+const demo = new URLSearchParams(location.search).has('demo');
 // `npx vite` alone: ?fixture serves tests/fixture.ts and applies events locally.
-const fixture = import.meta.env.DEV && location.search.includes('fixture');
-if (import.meta.env.DEV && fixture) {
+const fixture = !demo && import.meta.env.DEV && location.search.includes('fixture');
+if (demo) {
+  enterDemo({ tour: true });
+} else if (import.meta.env.DEV && fixture) {
   let st = structuredClone((await import('../../tests/fixture.ts')).fixture);
   s.server = null; s.pending = [];
   useFake(async (method, path, body) => {
@@ -32,13 +33,17 @@ if (import.meta.env.DEV && fixture) {
     st = { ...(op ? applyOps(st, [op]) : st), rev: st.rev + 1 };
     return st;
   });
+} else {
+  const saved = load();
+  s.server = saved.server;
+  s.pending = saved.pending;
 }
 
 // A newer build is deployed: update the service worker and reload once, when no sheet is open.
 let reg: ServiceWorkerRegistration | undefined;
 let updating = false;
 async function syncPushState(r?: ServiceWorkerRegistration): Promise<void> {
-  if (!s.ui.pushSupported) return;
+  if (s.ui.demo || !s.ui.pushSupported) return;
   s.ui.pushPermission = Notification.permission;
   const activeReg = r ?? reg ?? (await navigator.serviceWorker?.getRegistration().catch(() => undefined));
   if (!activeReg?.pushManager) return;
@@ -48,10 +53,10 @@ async function syncPushState(r?: ServiceWorkerRegistration): Promise<void> {
     commit();
   }
 }
-if (!fixture) registerSW({ immediate: true, onRegisteredSW: (_url, r) => { reg = r; void syncPushState(r); } });
+if (!fixture && !demo) registerSW({ immediate: true, onRegisteredSW: (_url, r) => { reg = r; void syncPushState(r); } });
 hooks.state = async () => {
   const b = s.server?.build;
-  if (!b || b === 'dev' || __BUILD__ === 'dev' || b === __BUILD__ || s.ui.sheet || updating) return;
+  if (s.ui.demo || !b || b === 'dev' || __BUILD__ === 'dev' || b === __BUILD__ || s.ui.sheet || updating) return;
   try {
     if (sessionStorage.getItem('myfood:reloaded') === b) return; // already tried: do not loop
     sessionStorage.setItem('myfood:reloaded', b);
@@ -79,7 +84,7 @@ addEventListener('offline', () => { s.ui.online = false; commit(); });
 // Refresh every 30 s while visible, every 2 s while a job is working; retry queued ops every 10 s.
 let tick = 0;
 setInterval(() => {
-  if (document.visibilityState !== 'visible' || !s.server) return;
+  if (document.visibilityState !== 'visible' || !s.server || s.ui.demo) return;
   tick++;
   const working = s.server.jobs.some(j => j.status === 'queued' || j.status === 'running');
   if (tick % (working ? 2 : 30) === 0) void refresh();

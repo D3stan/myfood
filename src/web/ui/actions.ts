@@ -13,7 +13,8 @@ import { barcodeToFields, bcModeOf, bcTotal, decodeBarcodePhoto, isBarcodeDetect
 import { amount, hourToTime, levelReadLabel, timeToHour, unitOf } from './components/bits.ts';
 import { cookBatchMacros } from './components/cook.ts';
 import { itemToFields, macroBasis } from './components/sheets.ts';
-import { afterState, commit, fail, hooks, mutate, parseOptCostCents, sheet, st, sync, toast } from './helpers.ts';
+import { TOUR_STEPS } from './components/tour.ts';
+import { afterState, commit, enterDemo, exitDemo, fail, hooks, mutate, parseOptCostCents, sheet, st, sync, toast } from './helpers.ts';
 import { shoppingText } from './screens/pantry.ts';
 import { frameActions } from './frame-actions.ts';
 import { settingsActions } from './settings/actions.ts';
@@ -157,6 +158,20 @@ export function overdrawWarning(v: State, lines: { item_id: number; qty: number 
 function confirmOverdraw(v: State, lines: { item_id: number; qty: number }[]): boolean {
   const msg = overdrawWarning(v, lines);
   return msg == null || (globalThis.confirm?.(msg) ?? true);
+}
+
+function goTourStep(idx: number): void {
+  const clamped = Math.max(0, Math.min(TOUR_STEPS.length - 1, idx));
+  const step = TOUR_STEPS[clamped]!;
+  stopScanner(s);
+  closeSheet(s);
+  const tabChanged = s.ui.tab !== step.tab || s.ui.page.length > 0;
+  s.ui.page = [];
+  s.ui.tab = step.tab;
+  s.ui.tour = { step: clamped };
+  if (tabChanged && typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+    window.scrollTo(0, 0);
+  }
 }
 
 const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
@@ -634,6 +649,19 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
     if (!code) return;
     try { receive(s, await api('POST', '/api/login', { code })); s.ui.f.code = ''; afterState(); } catch (e) { fail(e); }
   },
+  startDemo: () => { enterDemo({ tour: true }); },
+  exitDemo: () => { exitDemo(); void refresh(); void pump(); },
+  tourStart: () => { goTourStep(0); },
+  tourNext: () => {
+    const cur = s.ui.tour?.step ?? 0;
+    if (cur + 1 >= TOUR_STEPS.length) s.ui.tour = null;
+    else goTourStep(cur + 1);
+  },
+  tourPrev: () => {
+    const cur = s.ui.tour?.step ?? 0;
+    if (cur > 0) goTourStep(cur - 1);
+  },
+  tourSkip: () => { s.ui.tour = null; },
 };
 
 export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = { ...core, ...settingsActions, ...spendActions, ...frameActions };

@@ -13,10 +13,10 @@ export const tabbar = (tab: Tab) => html`<nav class="tabbar" aria-label="Tabs">$
 
 /** Looks like a text field; tapping it opens the top sheet so the keyboard never covers the real one. */
 export const composer = () => html`<div class="composer">
-  <button class="fake" id="composer" data-a="open" data-s="compose">Ate 2 eggs… bought milk… or snap a receipt</button>
+  <button class="fake" id="composer" data-a="open" data-s="compose">Ate 2 eggs… or snap a receipt</button>
   <button class="btn icon" data-a="open" data-s="compose" aria-label="Snap a receipt">📷</button>
 </div>`;
 
 export const toast = (ui: Ui) => ui.toast
-  ? html`<div class="toast" id="toast-${ui.toast.id}" role="status"><span>${ui.toast.msg}</span>${ui.toast.cids ? html`<button class="linkbtn" data-a="toastUndo">Undo</button>` : ''}</div>`
+  ? html`<div class="toast${ui.demo ? ' demo' : ''}" id="toast-${ui.toast.id}" role="status"><span>${ui.toast.msg}</span>${ui.toast.cids ? html`<button class="linkbtn" data-a="toastUndo">Undo</button>` : ''}</div>`
   : html``;

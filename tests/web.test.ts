@@ -635,6 +635,7 @@ describe('siri shortcuts and guest card', () => {
     for (const p of ['profile', 'household', 'presets', 'siri']) expect(root).toContain(`data-p="${p}"`);
     expect(root).toContain('data-a="logout"');
     expect(root).toContain('data-a="back"');
+    expect(root).toContain('aria-label="Back"');
     expect(root).toContain('data-a="tab"'); // tab bar stays
     const key: Record<string, string> = { profile: 'data-a="saveMe"', presets: 'data-s="presetEdit"' };
     for (const [p, needle] of Object.entries(key)) { s.ui.page = ['settings', p]; expect(appHtml(s)).toContain(needle); }

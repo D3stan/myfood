@@ -1,7 +1,7 @@
 // Settings pages' buttons: profile, notifications, household, presets, Siri tokens, sign out.
 import { api, createToken, revokeToken, saveSettings, subscribePush, testPush, unsubscribePush } from '../../api.ts';
 import { receive, store as s } from '../../store.ts';
-import { afterState, fail, mutate, signedOut, st, toast } from '../helpers.ts';
+import { afterState, exitDemo, fail, mutate, signedOut, st, toast } from '../helpers.ts';
 import { GOAL_FIELDS } from './goals.ts';
 import { shortcutText } from './shortcuts.ts';
 
@@ -156,5 +156,9 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
     try { await navigator.clipboard.writeText(`${location.origin}/guest  passcode: ${code}`); toast('Guest link and passcode copied'); }
     catch { toast('Copy failed — select and copy manually'); }
   },
-  logout: async () => { await api('POST', '/api/logout').catch(() => {}); signedOut(); },
+  logout: async () => {
+    if (s.ui.demo) { exitDemo(); return; }
+    await api('POST', '/api/logout').catch(() => {});
+    signedOut();
+  },
 };

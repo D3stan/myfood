@@ -58,6 +58,8 @@ export interface Ui {
   newToken: string | null;
   pushSupported: boolean;
   pushPermission: NotificationPermission | 'unsupported';
+  demo: boolean;
+  tour: { step: number } | null;
 }
 
 export interface Store {
@@ -77,6 +79,7 @@ export const newStore = (server: State | null = null, pending: PendingOp[] = [])
     ownerFilter: 'all', historyScope: 'me', spendScope: 'all', frames: {}, jobMode: 'auto',
     barcodeLookup: null, barcodeBusy: false, scannerActive: false, scannerSupported: false,
     newToken: null, pushSupported: false, pushPermission: 'default',
+    demo: false, tour: null,
   },
 });
 

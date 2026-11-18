@@ -126,7 +126,7 @@ export function spend(v: V, now: number | Date = new Date()) {
           const summary = e.note || e.lines.map(l => lineText(st.items, l)).join(', ') || 'Expense';
           return html`<button class="spend-row" id="exp-${e.cid}" data-a="open" data-s="event" data-id="${e.cid}">
             <span>${u?.emoji ?? '🙂'}</span>
-            <span class="grow clip"><b>${summary}</b> <span class="small muted">${isoDate(e.at)} · ${clock(e.at)}</span></span>
+            <span class="grow" style="min-width:0"><b class="clip">${summary}</b><span class="small muted">${isoDate(e.at)} · ${clock(e.at)}</span></span>
             <span class="cost">${fmtCost(e.cost_cents ?? 0, st.currency)}</span>
           </button>`;
         })}</div>` : ''}

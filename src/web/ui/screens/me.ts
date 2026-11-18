@@ -28,8 +28,8 @@ export function trendStats(rows: DailyNutrition[], days: string[], today: string
   };
 }
 
-export function me({ st, ui }: V) {
-  const now = Date.now(), today = isoDate(now);
+export function me({ st, ui }: V, nowInput: Date | number = Date.now()) {
+  const now = nowInput instanceof Date ? nowInput.getTime() : nowInput, today = isoDate(now);
   const mine = computeDailyNutrition(st.events, st.items, st.daily_nutrition).filter(d => d.user_id === st.me.id);
   const t = mine.find(d => d.day === today);
   const fr = frameOf(ui, 'me'), range = periodRange(fr.frame, fr.offset, now), nav = frameNav(fr.frame, fr.offset, now);
@@ -38,7 +38,7 @@ export function me({ st, ui }: V) {
   const avgCell = (l: string, v: number | null, u: string) => html`<span class="grow center"><b>${v == null ? '—' : n(v)}</b> <span class="muted small">${l}${v == null ? '' : ` ${u}`}</span></span>`;
   const g = st.me.goals;
   return html`
-    <div class="row" style="align-items:center"><h1 class="grow" style="margin:0">Me</h1><button id="me-settings" class="btn alt icon" data-a="go" data-p="settings" aria-label="Settings">⚙️</button></div>
+    <div class="top"><h1 class="grow" style="margin:0">Me</h1><button id="me-settings" class="btn alt icon" data-a="go" data-p="settings" aria-label="Settings">⚙️</button></div>
     <div class="card" id="today">
       <h2 style="margin-top:0">Today</h2>
       ${line('Calories', t?.kcal ?? 0, g.kcal, 'kcal')}

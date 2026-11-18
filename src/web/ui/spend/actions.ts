@@ -1,5 +1,6 @@
 // Spend sheet and week actions.
 import { addExpense, exportExpensesUrl, lockExpenses } from '../../api.ts';
+import { buildDemoExpenseExport } from '../../demo.ts';
 import { isoDate, parseIsoDate } from '../../../shared/dates.ts';
 import { closeSheet, receive, store as s } from '../../store.ts';
 import { afterState, commit, fail, parseOptCostCents, sheet, st, toast } from '../helpers.ts';
@@ -38,8 +39,20 @@ export const spendActions: Record<string, (el: HTMLElement) => void | Promise<un
   exportExpenses: el => {
     const period = el.dataset.p ?? '';
     const format = el.dataset.fmt === 'json' ? 'json' : 'csv';
-    const url = exportExpensesUrl(period, format);
     const a = document.createElement('a');
+    if (s.ui.demo) {
+      const out = buildDemoExpenseExport(st(), period, format);
+      const url = URL.createObjectURL(new Blob([out.body], { type: out.contentType }));
+      a.href = url;
+      a.download = out.filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
+    }
+    const url = exportExpensesUrl(period, format);
     a.href = url;
     a.download = `expenses-${period || 'all'}.${format}`;
     a.rel = 'noopener';
