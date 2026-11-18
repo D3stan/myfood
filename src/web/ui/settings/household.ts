@@ -1,4 +1,6 @@
 import { html } from '../../html.ts';
+import { CURRENCIES } from '../../../shared/currency.ts';
+import { currencySymbol } from '../../../shared/text.ts';
 import type { V } from '../components/bits.ts';
 
 const COUNTRIES: readonly [string, string][] = [
@@ -16,6 +18,11 @@ const COUNTRIES: readonly [string, string][] = [
   ['nl', 'Netherlands (NL)'],
 ];
 
+const names = new Intl.DisplayNames(['en'], { type: 'currency' });
+// a stored legacy non-ISO value is listed too, so the select shows what is really saved
+const options = (cur: string) => [...(CURRENCIES as readonly string[]).includes(cur) ? [] : [cur], ...CURRENCIES].map(c =>
+  html`<option value="${c}" ${c === cur ? 'selected' : ''}>${c} · ${names.of(c) ?? c} (${currencySymbol(c)})</option>`);
+
 export function household({ st, ui }: V) {
   const origin = typeof location !== 'undefined' && location.origin && location.origin !== 'null'
     ? location.origin
@@ -25,8 +32,8 @@ export function household({ st, ui }: V) {
   return html`
     <div class="card">
       <h2 style="margin-top:0">Household settings</h2>
-      <label class="field" for="currency">Currency symbol</label>
-      <input id="currency" type="text" maxlength="8" data-f="currency" value="${ui.f.currency ?? st.currency}" autocomplete="off" aria-label="Currency symbol">
+      <label class="field" for="currency">Currency</label>
+      <select id="currency" data-f="currency" aria-label="Currency">${options(ui.f.currency ?? st.currency)}</select>
       <label class="field" for="country">Country (for barcode lookups)</label>
       <select id="country" data-f="country" aria-label="Country for barcode lookups">
         ${COUNTRIES.map(([code, label]) => html`<option value="${code}" ${curCountry === code ? 'selected' : ''}>${label}</option>`)}

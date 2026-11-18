@@ -235,11 +235,14 @@ test('MCP HTTP initialize + tools/list + full item/event/cook/expense/lock lifec
     'log_preset',
     'add_expense',
     'lock_expense_week',
+    'unlock_expense_week',
     'lookup_barcode',
     'link_barcode',
     'set_alias',
     'delete_alias',
     'set_settings',
+    'get_settle_up',
+    'settle_up',
   ]) {
     expect(names.has(expected), `missing tool ${expected}`).toBe(true);
   }
@@ -436,12 +439,13 @@ test('MCP HTTP initialize + tools/list + full item/event/cook/expense/lock lifec
   const settingsRes = parseJsonResult(
     await client.callTool({
       name: 'set_settings',
-      arguments: { currency: 'EUR', country: 'DK', notify_low: false },
+      arguments: { currency: 'EUR', country: 'DK', notify_low: false, goals: { kcal: 2100, fat_g: null } },
     }),
   );
   expect(settingsRes.currency).toBe('EUR');
   expect(settingsRes.country).toBe('dk');
   expect((settingsRes.user as { notify_low: boolean }).notify_low).toBe(false);
+  expect((settingsRes.user as { goals: unknown }).goals).toEqual({ kcal: 2100, protein_g: null, fat_g: null, carbs_g: null });
 
   // 8. Expenses & weekly lock enforcement
   const week = isoWeek(clock);
@@ -469,6 +473,12 @@ test('MCP HTTP initialize + tools/list + full item/event/cook/expense/lock lifec
   });
   expect(lockedErr.isError).toBe(true);
   expect((lockedErr.content as { type: string; text: string }[])[0]!.text).toContain('locked');
+
+  // unlocking frees the week again; a second unlock is an error
+  const unlockRes = parseJsonResult(await client.callTool({ name: 'unlock_expense_week', arguments: { period: week } }));
+  expect(unlockRes.period).toBe(week);
+  expect((await client.callTool({ name: 'unlock_expense_week', arguments: { period: week } })).isError).toBe(true);
+  parseJsonResult(await client.callTool({ name: 'lock_expense_week', arguments: { period: week, note: 'Settled' } }));
 
   // 9. get_state (compact & full) + list_events + undo_event + archive_item
   const stateCompact = parseJsonResult(await client.callTool({ name: 'get_state', arguments: { compact: true } }));
@@ -844,7 +854,7 @@ test('stdio MCP transport connects against MYFOOD_DB and runs tools end-to-end',
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    expect(tools.tools.length).toBe(27);
+    expect(tools.tools.length).toBe(30);
     expect(tools.tools.map(t => t.name)).toContain('get_state');
     expect(tools.tools.map(t => t.name)).toContain('query_sql');
 
@@ -1041,6 +1051,24 @@ test('per-user token binds tools to its user: user_id argument is ignored', asyn
   expect((evs.events as unknown[]).length).toBe(2);
   const nut = parseJsonResult(await client.callTool({ name: 'get_daily_nutrition', arguments: { user_id: 2 } }));
   expect(nut.user_id).toBe(1);
+  await transport.close();
+  await client.close();
+});
+
+test('get_settle_up suggests transfers; settle_up resets them', async () => {
+  addBob();
+  const { client, transport } = await connectClient(app);
+  await client.callTool({ name: 'add_expense', arguments: { user_id: 1, cost_cents: 3000 } });
+  const before = parseJsonResult(await client.callTool({ name: 'get_settle_up', arguments: {} }));
+  expect(before.since).toBeNull();
+  expect(before.transfers).toEqual([]); // nobody ate anything: no debtor
+  expect((before.balances as { user_id: number; balance_cents: number }[]).find(b => b.user_id === 1)!.balance_cents).toBe(3000);
+  clock += 1000;
+  const done = parseJsonResult(await client.callTool({ name: 'settle_up', arguments: { user_id: 2, note: 'cash' } }));
+  expect(done.since).toBe(clock);
+  const after = parseJsonResult(await client.callTool({ name: 'get_settle_up', arguments: {} }));
+  expect(after.since).toBe(clock);
+  expect((after.balances as { balance_cents: number }[]).every(b => b.balance_cents === 0)).toBe(true);
   await transport.close();
   await client.close();
 });

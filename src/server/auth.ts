@@ -54,7 +54,16 @@ export function findSession(db: Db, token: string | undefined, now: number): { u
 }
 
 export const deleteSession = (db: Db, token: string): void => void run(db, 'DELETE FROM sessions WHERE token_hash = ?', sha256(token));
-export const deleteUserSessions = (db: Db, userId: number): void => void run(db, 'DELETE FROM sessions WHERE user_id = ?', userId);
+export const deleteUserSessions = (db: Db, userId: number, keepToken?: string): void =>
+  void run(db, 'DELETE FROM sessions WHERE user_id = ? AND token_hash IS NOT ?', userId, keepToken ? sha256(keepToken) : null);
+
+/** New access code for a user (returned once, only its hash is stored). Their sessions end, except keepToken's. */
+export function rotateCode(db: Db, userId: number, keepToken?: string): string {
+  const code = newCode();
+  run(db, 'UPDATE users SET code_hash = ? WHERE id = ?', sha256(code), userId);
+  deleteUserSessions(db, userId, keepToken);
+  return code;
+}
 
 export interface ApiTokenAuth {
   tokenId: number;

@@ -142,7 +142,7 @@ test('cook batch: portions+grams computes portion_g, macros from ingredients, co
   });
   expect(afterEat.items.find(i => i.id === meal.id)!.stock).toBe(900);
   expect(afterEat.usual[meal.id]).toBe(300);
-  expect(afterEat.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: afterEat.me.id, kcal: 600, protein_g: 37, fat_g: 19.7, carbs_g: 72.5, value_cents: 0, unpriced: 1 }]);
+  expect(afterEat.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: afterEat.me.id, kcal: 600, protein_g: 37, fat_g: 19.7, carbs_g: 72.5, value_cents: 0, unpriced: 1, no_kcal: 0 }]);
   expect(s0.rev).toBeLessThan(afterEat.rev);
 
   // Archiving an ingredient prunes it from meal_recipes so cookSheet has no stale Unknown line
@@ -452,7 +452,7 @@ test('carbs: eat snapshots known carbs, unknown stays null (never 0), daily carb
   // Only an unknown-carbs line today: carbs_g is null, not 0.
   const e1 = await st('POST', '/api/events', { cid: 'carb-eat-1', at: clock, kind: 'eat', lines: [{ item_id: mystery!, qty: 100 }] });
   expect(e1.events[0]!.lines[0]!.carbs_g).toBeUndefined();
-  expect(e1.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: e1.me.id, kcal: 200, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1 }]);
+  expect(e1.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: e1.me.id, kcal: 200, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1, no_kcal: 0 }]);
 
   // A known zero is a real 0; known carbs are summed, the unknown line adds nothing.
   await st('POST', '/api/events', { cid: 'carb-eat-2', at: clock + 1, kind: 'eat', lines: [{ item_id: zero!, qty: 100 }] });
@@ -497,7 +497,7 @@ const idOf = (s: State, name: string) => s.items.find(i => i.name === name)!.id;
 const priceOf = (s: State, id: number) => s.items.find(i => i.id === id)!.cost_per_unit_cents;
 const valueOf = (cid: string) => (db.prepare('SELECT value_cents FROM event_lines WHERE event_cid = ?').get(cid) as { value_cents: number | null }).value_cents;
 
-test('item price: a priced buy learns it, an unpriced buy keeps it, last price wins', async () => {
+test('item price: a priced buy learns it, an unpriced buy keeps it, later buys average in', async () => {
   const id = idOf(await mk('Rice', 'g'), 'Rice');
   expect(priceOf(await st('GET', '/api/state'), id)).toBeNull();
   await st('POST', '/api/events', { cid: 'price-b1', at: clock - 3000, kind: 'buy', lines: [{ item_id: id, qty: 1000, cost_cents: 2500 }] });
@@ -505,6 +505,26 @@ test('item price: a priced buy learns it, an unpriced buy keeps it, last price w
   await st('POST', '/api/events', { cid: 'price-b2', at: clock - 2000, kind: 'buy', lines: [{ item_id: id, qty: 500 }] });
   expect(priceOf(await st('GET', '/api/state'), id)).toBe(2.5);
   await st('POST', '/api/events', { cid: 'price-b3', at: clock - 1000, kind: 'buy', lines: [{ item_id: id, qty: 500, cost_cents: 1500 }] });
+  expect(priceOf(await st('GET', '/api/state'), id)).toBe(2.75); // avg(2.5, 3)
+});
+
+test('item price: averages only the last 3 priced buys and skips undone ones', async () => {
+  const id = idOf(await mk('Lentils', 'g'), 'Lentils');
+  const buy = (cid: string, n: number, cost: number) => st('POST', '/api/events', { cid, at: clock - 5000 + n, kind: 'buy', lines: [{ item_id: id, qty: 100, cost_cents: cost }] });
+  await buy('price-avg1', 1, 1000); // 10/unit, falls out of the window
+  await buy('price-avg2', 2, 100);  // 1
+  await buy('price-avg3', 3, 200);  // 2
+  await buy('price-avg4', 4, 300);  // 3
+  expect(priceOf(await st('GET', '/api/state'), id)).toBe(2);
+  await st('DELETE', '/api/events/price-avg4');
+  await buy('price-avg5', 5, 600);  // 6; undone avg4 is skipped, so avg2, avg3, avg5
+  expect(priceOf(await st('GET', '/api/state'), id)).toBe(3);
+});
+
+test('item price: editing a buy learns the new price', async () => {
+  const id = idOf(await mk('Flour', 'g'), 'Flour');
+  await st('POST', '/api/events', { cid: 'price-e1', at: clock - 1000, kind: 'buy', lines: [{ item_id: id, qty: 1000, cost_cents: 2500 }] });
+  await st('PATCH', '/api/events/price-e1', { lines: [{ item_id: id, qty: 1000, cost_cents: 3000 }] });
   expect(priceOf(await st('GET', '/api/state'), id)).toBe(3);
 });
 
@@ -582,9 +602,109 @@ test('daily_nutrition value_cents sums eat lines, unpriced counts null ones, a v
   const eggs = idOf(s0, 'Eggs'), salt = idOf(s0, 'Salt');
   // No macros anywhere: the day exists only because of value / unpriced.
   const s1 = await st('POST', '/api/events', { cid: 'dv-eat-1', at: clock - 2000, kind: 'eat', lines: [{ item_id: eggs, qty: 3 }, { item_id: salt, qty: 1 }] });
-  expect(s1.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: s1.me.id, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 750, unpriced: 1 }]);
+  expect(s1.daily_nutrition).toEqual([{ day: isoDate(clock), user_id: s1.me.id, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 750, unpriced: 1, no_kcal: 2 }]);
   const s2 = await st('POST', '/api/events', { cid: 'dv-eat-2', at: clock - 1000, kind: 'eat', lines: [{ item_id: eggs, qty: 1 }] });
-  expect(s2.daily_nutrition[0]).toMatchObject({ value_cents: 1000, unpriced: 1 });
+  expect(s2.daily_nutrition[0]).toMatchObject({ value_cents: 1000, unpriced: 1, no_kcal: 3 });
+});
+
+test('settle: balances = paid - ate since the last settlement; settling resets them; later activity counts again', async () => {
+  const s0 = await mk('Eggs', 'pc', { cost_per_unit_cents: 250 });
+  await mk('Salt', 'pc');
+  const eggs = idOf(s0, 'Eggs'), salt = idOf(await st('GET', '/api/state'), 'Salt');
+  await st('POST', '/api/expenses', { cid: 'settle-x1', at: clock - 5000, cost_cents: 10000 }); // alice paid
+  await st('POST', '/api/expenses', { cid: 'settle-x2', at: clock - 4000, cost_cents: 2000 }, 'bob');
+  await st('POST', '/api/events', { cid: 'settle-e1', at: clock - 3000, kind: 'eat', lines: [{ item_id: eggs, qty: 4 }, { item_id: salt, qty: 1 }] }, 'bob'); // 1000 + unpriced
+  const s1 = await st('GET', '/api/state');
+  expect(s1.settle).toEqual({
+    since: null,
+    balances: [
+      { user_id: 1, paid_cents: 10000, ate_cents: 0, balance_cents: 10000 },
+      { user_id: 2, paid_cents: 2000, ate_cents: 1000, balance_cents: 1000 },
+    ],
+    unpriced: 1,
+  });
+  // an expense in a locked week can still be settled: settlement ignores locks
+  await st('POST', '/api/expenses/lock', { period: isoWeek(clock) });
+  clock += 1000;
+  const s2 = await st('POST', '/api/settle');
+  expect(s2.settle.since).toBe(clock);
+  expect(s2.settle.balances.every(x => x.balance_cents === 0 && x.paid_cents === 0)).toBe(true);
+  expect(s2.settle.unpriced).toBe(0);
+  expect(s2.rev).toBeGreaterThan(s1.rev);
+  clock += 1000;
+  await st('POST', '/api/events', { cid: 'settle-e2', at: clock, kind: 'eat', lines: [{ item_id: eggs, qty: 2 }] }, 'bob');
+  const s3 = await st('GET', '/api/state');
+  expect(s3.settle.balances).toEqual([
+    { user_id: 1, paid_cents: 0, ate_cents: 0, balance_cents: 0 },
+    { user_id: 2, paid_cents: 0, ate_cents: 500, balance_cents: -500 },
+  ]);
+});
+
+test('stats: spend per day and user, ate value, range edges, validation and auth', async () => {
+  const id = idOf(await mk('Stat rice', 'g', { kcal_per_unit: 3 }), 'Stat rice');
+  const d1 = clock - 3 * 86_400_000, d2 = clock - 86_400_000;
+  await st('POST', '/api/events', { cid: 'stats-b1', at: d1, kind: 'buy', lines: [{ item_id: id, qty: 1000, cost_cents: 1000 }] });
+  await st('POST', '/api/expenses', { cid: 'stats-x1', at: d1, cost_cents: 500, note: 'bus' }, 'bob');
+  await st('POST', '/api/expenses', { cid: 'stats-x2', at: d2, cost_cents: 200, note: 'tea' });
+  await st('POST', '/api/events', { cid: 'stats-e1', at: d2, kind: 'eat', lines: [{ item_id: id, qty: 100 }] });
+  await st('POST', '/api/events', { cid: 'stats-e2', at: d2, kind: 'eat', lines: [{ item_id: id, qty: 100 }] }, 'bob');
+  const [day1, day2] = [isoDate(d1), isoDate(d2)];
+  const get = async (q: string, path = 'spend', who = 'alice') => req('GET', `/api/stats/${path}?${q}`, undefined, who);
+
+  const r = await get(`from=${day1}&to=${day2}`);
+  expect(r.status).toBe(200);
+  expect(await r.json()).toEqual({
+    from: day1, to: day2,
+    paid: [
+      { day: day1, user_id: 1, cents: 1000 }, { day: day1, user_id: 2, cents: 500 }, { day: day2, user_id: 1, cents: 200 },
+    ],
+    ate: [
+      { day: day2, user_id: 1, value_cents: 100, unpriced: 0 }, { day: day2, user_id: 2, value_cents: 100, unpriced: 0 },
+    ],
+  });
+  // `to` is inclusive, `from` too; a narrower range drops the rest
+  const one = await (await get(`from=${day2}&to=${day2}`)).json();
+  expect(one.paid).toEqual([{ day: day2, user_id: 1, cents: 200 }]);
+  expect((await (await get(`from=${isoDate(clock)}&to=${isoDate(clock)}`)).json()).paid).toEqual([]);
+
+  // nutrition: only the caller's rows
+  const n = await (await get(`from=${day1}&to=${day2}`, 'nutrition', 'bob')).json();
+  expect(n.rows).toHaveLength(1);
+  expect(n.rows[0]).toMatchObject({ day: day2, user_id: 2, kcal: 300, value_cents: 100 });
+  expect((await (await get(`from=${day1}&to=${day2}`, 'nutrition')).json()).rows[0]).toMatchObject({ user_id: 1, kcal: 300 });
+
+  for (const path of ['spend', 'nutrition']) {
+    expect((await get('from=2026-11-01', path)).status).toBe(400); // to missing
+    expect((await get('from=nope&to=2026-11-02', path)).status).toBe(400);
+    expect((await get('from=2026-02-30&to=2026-03-02', path)).status).toBe(400); // not a real date
+    expect((await get('from=2026-11-05&to=2026-11-01', path)).status).toBe(400); // reversed
+    expect((await get('from=2025-01-01&to=2026-11-01', path)).status).toBe(400); // over 400 days
+    expect((await get('from=2026-01-01&to=2026-12-31', path)).status).toBe(200); // a full year fits
+    expect((await app.request(`/api/stats/${path}?from=${day1}&to=${day2}`)).status).toBe(401);
+  }
+});
+
+test('item prices: last priced buys newest first, per unit, skipping unpriced, undone and level', async () => {
+  const s = await mk('Price rice', 'g');
+  const id = idOf(s, 'Price rice');
+  const buy = (cid: string, n: number, line: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    st('POST', '/api/events', { cid, at: clock - 100_000 + n, kind: 'buy', lines: [{ item_id: id, qty: 100, ...line }], ...extra });
+  await buy('prices-pp1', 1, { cost_cents: 100 });
+  await buy('prices-pp2', 2, {}); // unpriced
+  await buy('prices-pp3', 3, { cost_cents: 300 });
+  await buy('prices-pp4', 4, {}, { cost_cents: 800 }); // a lone line takes the event cost
+  await buy('prices-pp5', 5, { cost_cents: 999 });
+  await st('DELETE', '/api/events/prices-pp5');
+  const prices = async (i = id) => (await req('GET', `/api/items/${i}/prices`)).json();
+  expect(await prices()).toEqual([
+    { at: clock - 100_000 + 4, unit_cents: 8 }, { at: clock - 100_000 + 3, unit_cents: 3 }, { at: clock - 100_000 + 1, unit_cents: 1 },
+  ]);
+  for (let i = 0; i < 12; i++) await buy(`prices-ppm${i}`, 10 + i, { cost_cents: 100 });
+  expect(await prices()).toHaveLength(10);
+  const level = idOf(await mk('Price salt', 'level'), 'Price salt');
+  expect(await prices(level)).toEqual([]);
+  expect((await req('GET', '/api/items/9999/prices')).status).toBe(404);
+  expect((await app.request(`/api/items/${id}/prices`)).status).toBe(401);
 });
 
 test('barcode lookup hardening: missing quantity keeps 100g macros, parses kJ/serving_size/oz, and uses country locale', async () => {

@@ -1,76 +1,38 @@
 import { html } from '../../html.ts';
-import { isoDate, isoWeek, parseIsoDate, weekRange } from '../../../shared/dates.ts';
+import { MONTHS, isoDate, isoWeek, parseIsoDate } from '../../../shared/dates.ts';
 import { computeDailyNutrition } from '../../../shared/nutrition.ts';
-import { frameNav, periodRange } from '../../../shared/period.ts';
+import { frameNav, periodBuckets, periodRange } from '../../../shared/period.ts';
+import { settleTransfers } from '../../../shared/settle.ts';
+import { bucketByUser, groupExpensesByWeek, paidRows, sumRows } from '../../../shared/spend.ts';
 import { fmtCost } from '../../../shared/text.ts';
-import type { ExpenseLock, FoodEvent } from '../../../shared/types.ts';
 import { clock, lineText, userOf } from '../components/bits.ts';
 import type { V } from '../components/bits.ts';
 import { COLORS, barChart } from '../components/chart.ts';
 import { frameBar, frameOf } from '../components/frame.ts';
-
-interface WeekGroup {
-  period: string;
-  label: string;
-  totalCents: number;
-  byUser: Map<number, number>;
-  events: FoodEvent[];
-  lock?: ExpenseLock;
-}
-
-function groupExpensesByWeek(expenses: FoodEvent[], locks: ExpenseLock[], now: number | Date): WeekGroup[] {
-  const lockMap = new Map(locks.map(l => [l.period, l]));
-  const map = new Map<string, WeekGroup>();
-  const ensure = (period: string): WeekGroup => {
-    let g = map.get(period);
-    if (!g) {
-      g = {
-        period,
-        label: weekRange(period)?.label ?? period,
-        totalCents: 0,
-        byUser: new Map(),
-        events: [],
-        lock: lockMap.get(period),
-      };
-      map.set(period, g);
-    }
-    return g;
-  };
-  for (const e of [...expenses].sort((a, b) => b.at - a.at)) {
-    const cents = e.cost_cents ?? 0;
-    if (cents <= 0) continue;
-    const g = ensure(isoWeek(e.at));
-    g.totalCents += cents;
-    g.byUser.set(e.user_id, (g.byUser.get(e.user_id) ?? 0) + cents);
-    g.events.push(e);
-  }
-  for (const l of locks) {
-    const g = ensure(l.period);
-    if (!g.events.length && l.total_cents > 0) g.totalCents = l.total_cents;
-  }
-  if (!map.size) ensure(isoWeek(now));
-  return [...map.values()].sort((a, b) => b.period.localeCompare(a.period));
-}
+import { statsFor } from '../stats.ts';
 
 export function spend(v: V, now: number | Date = new Date()) {
   const { st, ui } = v;
   const nowMs = now instanceof Date ? now.getTime() : now;
-  const fr = frameOf(ui, 'spend'), range = periodRange(fr.frame, fr.offset, nowMs), nav = frameNav(fr.frame, fr.offset, nowMs);
+  const fr = frameOf(ui, 'spend'), range = periodRange(fr.frame, fr.offset, nowMs), nav = frameNav(fr.frame, fr.offset, nowMs, ui.online);
+  const wide = statsFor(ui, 'spend', fr.frame, range, nowMs); // outside the 90-day window: fetched rows, not State
   const inFrame = new Set(range.days);
   const mineOnly = ui.spendScope === 'mine';
-  const paid = st.expenses.filter(e => (e.cost_cents ?? 0) > 0 && inFrame.has(isoDate(e.at)));
-  const shown = mineOnly ? paid.filter(e => e.user_id === st.me.id) : paid;
+  const paidEvents = wide.data || wide.loading ? [] : st.expenses.filter(e => (e.cost_cents ?? 0) > 0 && inFrame.has(isoDate(e.at)));
+  const paid = wide.data ? wide.data.paid : paidRows(paidEvents);
+  const shown = mineOnly ? paid.filter(r => r.user_id === st.me.id) : paid;
+  const shownEvents = mineOnly ? paidEvents.filter(e => e.user_id === st.me.id) : paidEvents;
+  // Week cards list State events, so they are hidden in a Year frame (month totals are the bars) and for fetched periods.
   const weeks = new Set(range.days.map(d => isoWeek(parseIsoDate(d)!)));
-  const groups = groupExpensesByWeek(st.expenses.filter(e => !mineOnly || e.user_id === st.me.id), st.expense_locks, nowMs)
+  const groups = fr.frame === 'year' || wide.data || wide.loading ? [] : groupExpensesByWeek(shownEvents, st.expense_locks, nowMs)
     .filter(g => weeks.has(g.period));
-  const total = paid.reduce((a, e) => a + e.cost_cents!, 0);
-  const ate = computeDailyNutrition(st.events, st.items, st.daily_nutrition).filter(d => inFrame.has(d.day));
-  const paidBy = (id: number) => paid.filter(e => e.user_id === id).reduce((a, e) => a + e.cost_cents!, 0);
-  // month = one bar per day (about 8 labels): simpler than ISO-week buckets
-  const bars = range.days.map((d, i) => ({
-    label: fr.frame === 'week' ? 'MTWTFSS'[i]! : String(i + 1),
-    values: st.users.map(u => shown.filter(e => e.user_id === u.id && isoDate(e.at) === d).reduce((a, e) => a + e.cost_cents!, 0)),
-  }));
+  const total = sumRows(paid);
+  const ate = wide.data ? wide.data.ate : wide.loading ? [] : computeDailyNutrition(st.events, st.items, st.daily_nutrition).filter(d => inFrame.has(d.day));
+  const paidBy = (id: number) => sumRows(paid.filter(r => r.user_id === id));
+  const bars = periodBuckets(fr.frame, range).map(b => ({ label: b.label, values: bucketByUser(shown, st.users, fr.frame, b.key) }));
+  const transfers = settleTransfers(st.settle.balances);
+  const since = st.settle.since ? new Date(st.settle.since) : null;
+  const who = (id: number) => { const u = st.users.find(x => x.id === id); return `${u?.emoji ?? '🙂'} ${u?.name ?? '?'}`; };
   const hasAny = st.expenses.some(e => (e.cost_cents ?? 0) > 0) || st.expense_locks.length > 0;
 
   return html`
@@ -79,7 +41,7 @@ export function spend(v: V, now: number | Date = new Date()) {
       <button class="btn right" data-a="open" data-s="expense">+ Log expense</button>
     </div>
     ${hasAny ? '' : html`<p class="note">No expenses logged yet. Tap "+ Log expense" or scan a receipt with prices.</p>`}
-    ${frameBar('spend', fr.frame, fr.offset, range.label, nav.canPrev, nav.partial)}
+    ${frameBar('spend', fr.frame, fr.offset, range.label, nav.canPrev, nav.partial && !wide.data && !wide.loading, wide.loading)}
     <div class="card" id="spend-summary">
       <div class="row" style="align-items:center"><span class="small muted grow">Household paid</span><span id="spend-total" style="font-family:'Permanent Marker',cursive;font-size:1.6rem">${fmtCost(total, st.currency)}</span></div>
       ${barChart({ bars, fmt: c => fmtCost(c, st.currency) })}
@@ -93,12 +55,20 @@ export function spend(v: V, now: number | Date = new Date()) {
       <div id="spend-users">${st.users.map(u => {
         const p = paidBy(u.id), mine = ate.filter(d => d.user_id === u.id);
         const unpriced = mine.reduce((a, d) => a + d.unpriced, 0);
-        return html`<div class="row" id="spend-user-${u.id}" style="margin-top:6px;flex-wrap:wrap">
-          <span class="grow">${u.emoji} ${u.name}</span>
-          <span>paid ${fmtCost(p, st.currency)}${total > 0 ? ` (${Math.round((p / total) * 100)}%)` : ''}</span>
-          <span>· ate ${fmtCost(mine.reduce((a, d) => a + d.value_cents, 0), st.currency)}${unpriced > 0 ? html` <span class="small muted">+${unpriced} unpriced</span>` : ''}</span>
+        return html`<div id="spend-user-${u.id}" style="margin-top:6px">
+          <div class="row"><span class="grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.emoji} ${u.name}</span>
+            <span class="small" style="white-space:nowrap">paid ${fmtCost(p, st.currency)}${total > 0 ? ` (${Math.round((p / total) * 100)}%)` : ''} · ate ${fmtCost(mine.reduce((a, d) => a + d.value_cents, 0), st.currency)}</span></div>
+          ${unpriced > 0 ? html`<div class="small muted" style="text-align:right">+${unpriced} unpriced</div>` : ''}
         </div>`;
       })}</div>
+    </div>
+    <div class="card" id="settle">
+      <b>Settle up</b> <span class="small muted">${since ? `since ${since.getDate()} ${MONTHS[since.getMonth()]}` : 'since the start'}</span>
+      ${transfers.length
+        ? transfers.map(t => html`<div class="row" style="margin-top:6px">${who(t.from)} → ${who(t.to)} <b class="right">${fmtCost(t.cents, st.currency)}</b></div>`)
+        : html`<p class="small" style="margin:6px 0">All square</p>`}
+      ${st.settle.unpriced > 0 ? html`<p class="small muted" style="margin:6px 0">${st.settle.unpriced} eaten items had no price</p>` : ''}
+      <button class="btn alt" data-a="settleUp" ${ui.online ? '' : 'disabled'}>Mark as settled</button>
     </div>
     ${groups.map(g => html`
       <div class="card" id="week-${g.period}">

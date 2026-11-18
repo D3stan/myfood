@@ -4,7 +4,6 @@ import { createDemoApi, createDemoState } from '../demo.ts';
 import { clear, load, save } from '../outbox.ts';
 import { parseCostCents } from '../../shared/text.ts';
 import { receive, store as s, view } from '../store.ts';
-import { stopScanner } from './components/barcode.ts';
 import { render } from './render.ts';
 
 export const hooks: { state?: () => void } = {};
@@ -38,7 +37,6 @@ export async function mutate(method: 'POST' | 'PATCH' | 'DELETE', path: string, 
 }
 
 function resetSessionUi(): void {
-  stopScanner(s);
   s.pending = [];
   s.inflight.clear();
   s.flushing = false;
@@ -48,6 +46,10 @@ function resetSessionUi(): void {
   s.ui.toast = null;
   s.ui.editing = null;
   s.ui.newToken = null;
+  s.ui.newCode = null;
+  s.ui.data = null;
+  s.ui.stats = { spend: {}, nutrition: {} };
+  s.ui.prices = {};
   s.ui.barcodeLookup = null;
   s.ui.seenDone.clear();
   s.ui.f = {};
@@ -93,9 +95,8 @@ export function exitDemo(): void {
 
 export const signedOut = (): void => {
   if (s.ui.demo) { exitDemo(); return; }
-  stopScanner(s);
   s.server = null; s.pending = []; s.ui.loggedOut = true; s.ui.sheet = null; s.ui.tab = 'pantry';
-  s.ui.newToken = null; s.ui.barcodeLookup = null; s.ui.page = [];
+  s.ui.newToken = null; s.ui.newCode = null; s.ui.data = null; s.ui.stats = { spend: {}, nutrition: {} }; s.ui.prices = {}; s.ui.barcodeLookup = null; s.ui.page = [];
   clear(); commit();
 };
 onUnauthorized(signedOut);

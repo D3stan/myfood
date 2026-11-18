@@ -37,9 +37,9 @@ export function appHtml(s: Store, now = new Date()): string {
     ? (s.ui.loggedOut ? login(s.ui) : html`<p class="center muted" style="margin-top:30vh">Loading…</p>`)
     : html`${demoBanner(s)}${s.ui.page.length ? page({ st, ui: s.ui }, s.ui.page[s.ui.page.length - 1]!)
         : s.ui.tab === 'pantry' ? pantry({ st, ui: s.ui }, now)
-        : s.ui.tab === 'spend' ? spend({ st, ui: s.ui }, now)
+        : s.ui.tab === 'spend' ? spend({ st, ui: s.ui }, st.now)
         : s.ui.tab === 'history' ? history({ st, ui: s.ui }, now)
-        : me({ st, ui: s.ui }, now)}${composer()}${tabbar(s.ui.tab)}`;
+        : me({ st, ui: s.ui })}${composer()}${tabbar(s.ui.tab)}`;
   return htmlToString(out);
 }
 

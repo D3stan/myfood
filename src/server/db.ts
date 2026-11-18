@@ -163,4 +163,16 @@ export function migrate(db: Db): void {
       db.exec('PRAGMA user_version = 4');
     });
   }
+
+  if (version < 5) {
+    transaction(db, () => {
+      // the currency used to be a free-text symbol; 'kr' is the only value ever defaulted
+      db.exec("UPDATE meta SET value = 'DKK' WHERE key = 'currency' AND value = 'kr'; PRAGMA user_version = 5");
+    });
+  }
+  if (version < 6) {
+    transaction(db, () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS settlements (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, by_user_id INTEGER NOT NULL REFERENCES users(id), note TEXT); PRAGMA user_version = 6`);
+    });
+  }
 }

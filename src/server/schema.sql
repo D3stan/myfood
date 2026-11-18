@@ -155,6 +155,13 @@ CREATE TABLE IF NOT EXISTS expense_locks (
   note TEXT
 );
 
+CREATE TABLE IF NOT EXISTS settlements (
+  id INTEGER PRIMARY KEY,
+  at INTEGER NOT NULL,
+  by_user_id INTEGER NOT NULL REFERENCES users(id),
+  note TEXT
+);
+
 CREATE TABLE IF NOT EXISTS barcodes (
   code TEXT PRIMARY KEY,
   item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
@@ -181,4 +188,4 @@ CREATE TABLE IF NOT EXISTS meal_recipes (
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT OR IGNORE INTO meta(key, value) VALUES ('rev', '0');
-INSERT OR IGNORE INTO meta(key, value) VALUES ('currency', 'kr');
+INSERT OR IGNORE INTO meta(key, value) VALUES ('currency', 'DKK');

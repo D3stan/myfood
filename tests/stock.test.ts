@@ -8,7 +8,8 @@ import { openDb } from '../src/server/db.ts';
 import { addDays, daysUntil, isoDate, isoWeek, weekRange } from '../src/shared/dates.ts';
 import { computeDailyNutrition, eventNutrition } from '../src/shared/nutrition.ts';
 import { applyOps, computeStock, isExpiringSoon, isLow, levelParts, portionCount, shown, toLines } from '../src/shared/stock.ts';
-import { aliasKey, fmtCost, fmtNum, nameKey, parseCostCents, parseNum } from '../src/shared/text.ts';
+import { SettingsBody } from '../src/shared/types.ts';
+import { aliasKey, currencySymbol, fmtCost, fmtNum, nameKey, parseCostCents, parseNum } from '../src/shared/text.ts';
 import { AiResult } from '../src/shared/types.ts';
 import { amount, levelName, levelReadLabel, lineText } from '../src/web/ui/components/bits.ts';
 import { fixture } from './fixture.ts';
@@ -91,14 +92,14 @@ test('applyOps shows pending work on top of server state and updates nutrition a
   expect(out.usual[1]).toBe(2);
   expect(fixture.items.find(i => i.id === 1)!.stock).toBe(7);
   const today = isoDate(fixture.now);
-  expect(out.daily_nutrition.find(x => x.day === today && x.user_id === 1)).toEqual({ day: today, user_id: 1, kcal: 156, protein_g: 12.6, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1 });
+  expect(out.daily_nutrition.find(x => x.day === today && x.user_id === 1)).toEqual({ day: today, user_id: 1, kcal: 156, protein_g: 12.6, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1, no_kcal: 0 });
   // once the server lists the event, the pending op adds nothing
   expect(applyOps(out, [eat]).items.find(i => i.id === 1)!.stock).toBe(5);
   // undo of a server event
   const undone = applyOps(fixture, [{ type: 'undo', cid: 'ev-00000003' }]);
   expect(undone.items.find(i => i.id === 6)!.stock).toBe(1000);
   expect(undone.events.some(e => e.cid === 'ev-00000003')).toBe(false);
-  expect(undone.daily_nutrition.find(x => x.day === isoDate(fixture.events[0]!.at) && x.user_id === 2)).toEqual({ day: isoDate(fixture.events[0]!.at), user_id: 2, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 0 });
+  expect(undone.daily_nutrition.find(x => x.day === isoDate(fixture.events[0]!.at) && x.user_id === 2)).toEqual({ day: isoDate(fixture.events[0]!.at), user_id: 2, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 0, no_kcal: 0 });
   // optimistic buy with cost shows in expenses
   const buy = { type: 'event' as const, body: { cid: 'pending-buy-1', at: fixture.now, kind: 'buy' as const, lines: [{ item_id: 1, qty: 10 }], cost_cents: 3000 } };
   const bought = applyOps(fixture, [buy]);
@@ -147,8 +148,18 @@ test('dates and cost helpers', () => {
   expect(parseCostCents('24,95')).toBe(2495);
   expect(parseCostCents('100')).toBe(10000);
   expect(parseCostCents('12.345')).toBeNaN();
-  expect(fmtCost(2495, 'kr')).toBe('24.95 kr');
-  expect(fmtCost(10000, 'kr')).toBe('100 kr');
+  expect(fmtCost(2495, 'DKK')).toBe('24,95\u00a0kr.');
+  expect(fmtCost(10000, 'DKK')).toBe('100\u00a0kr.');
+  expect(fmtCost(-2495, 'EUR')).toBe('-24,95\u00a0€');
+  expect(fmtCost(10000, 'JPY')).toBe('100\u00a0¥');
+  expect(fmtCost(2495, 'kr')).toBe('24.95 kr'); // legacy non-ISO value
+  expect(currencySymbol('DKK')).toBe('kr.');
+  expect(currencySymbol('kr')).toBe('kr');
+});
+
+test('SettingsBody accepts only listed ISO currency codes', () => {
+  expect(SettingsBody.safeParse({ currency: 'EUR' }).success).toBe(true);
+  for (const bad of ['kr', 'eur', 'XXX', '', '€']) expect(SettingsBody.safeParse({ currency: bad }).success, bad).toBe(false);
 });
 
 test('text helpers', () => {
@@ -204,7 +215,7 @@ test('openDb migrates an existing v1 database idempotently without losing rows',
     raw.close();
 
     const db = openDb(file);
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
     // v4 adds item price and eat-line value: old rows read NULL (unknown)
     expect(db.prepare('SELECT cost_per_unit_cents FROM items').get()).toEqual({ cost_per_unit_cents: null });
     expect(db.prepare('SELECT value_cents, qty FROM event_lines').get()).toEqual({ value_cents: null, qty: 10 });
@@ -247,10 +258,27 @@ test('openDb migrates a v3 database to v4 keeping its rows, with price and value
     first.close();
 
     const db = openDb(file);
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
     expect(db.prepare('SELECT carbs_per_unit, cost_per_unit_cents FROM items').get()).toEqual({ carbs_per_unit: 0.5, cost_per_unit_cents: null });
     expect(db.prepare('SELECT qty, cost_cents, carbs_g, value_cents FROM event_lines').get()).toEqual({ qty: -2, cost_cents: 900, carbs_g: 1, value_cents: null });
     db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('openDb migrates a stored legacy "kr" currency to DKK and leaves other values', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mf-mig5-'));
+  const file = join(dir, 'myfood.db');
+  try {
+    for (const [before, after] of [['kr', 'DKK'], ['EUR', 'EUR'], ['zł', 'zł']]) {
+      const first = openDb(file);
+      first.exec(`UPDATE meta SET value = '${before}' WHERE key = 'currency'; PRAGMA user_version = 4`);
+      first.close();
+      const db = openDb(file);
+      expect(db.prepare("SELECT value FROM meta WHERE key = 'currency'").get()).toEqual({ value: after });
+      db.close();
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -260,8 +288,8 @@ test('pending eat ops add value and unpriced to daily nutrition', () => {
   const items = [{ id: 1, cost_per_unit_cents: 2.5 }, { id: 2, cost_per_unit_cents: null }];
   const ev = { ...fixture.events[0]!, kind: 'eat' as const, counts_nutrition: true, at: fixture.now, user_id: 1,
     lines: [{ item_id: 1, qty: -3, is_set: false }, { item_id: 2, qty: -1, is_set: false }] };
-  expect(computeDailyNutrition([ev], items)).toEqual([{ day: isoDate(fixture.now), user_id: 1, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 8, unpriced: 1 }]);
+  expect(computeDailyNutrition([ev], items)).toEqual([{ day: isoDate(fixture.now), user_id: 1, kcal: 0, protein_g: 0, fat_g: 0, carbs_g: null, value_cents: 8, unpriced: 1, no_kcal: 2 }]);
   const eat = { type: 'event' as const, body: { cid: 'pv-1', at: fixture.now, kind: 'eat' as const, lines: [{ item_id: 1, qty: 2 }] } };
   const out = applyOps({ ...fixture, items: fixture.items.map(i => i.id === 1 ? { ...i, cost_per_unit_cents: 100 } : i) }, [eat]);
-  expect(out.daily_nutrition.find(d => d.user_id === 1 && d.day === isoDate(fixture.now))).toMatchObject({ value_cents: 200, unpriced: 0 });
+  expect(out.daily_nutrition.find(d => d.user_id === 1 && d.day === isoDate(fixture.now))).toMatchObject({ value_cents: 200, unpriced: 0, no_kcal: 0 });
 });

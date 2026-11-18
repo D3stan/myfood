@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { DEFAULT_CURRENCY } from '../../shared/currency.ts';
 import { ISO_WEEK_RE, isoWeek } from '../../shared/dates.ts';
+import { settleTransfers } from '../../shared/settle.ts';
 import { ExpenseBody, LockPeriodBody } from '../../shared/types.ts';
 import { all, get, getMeta, getRev } from '../db.ts';
 import { DESTRUCTIVE_ANNOTATIONS, READ_ANNOTATIONS, WRITE_ANNOTATIONS, okResult, resolveUserId, runTool } from '../mcp-kit.ts';
 import type { McpCtx } from '../mcp-kit.ts';
-import { addExpense, exportExpenses, lockExpensePeriod } from './repo.ts';
+import { addExpense, exportExpenses, lockExpensePeriod, settleInfo, settleUp, unlockExpensePeriod } from './repo.ts';
 
 export function registerSpendTools(server: McpServer, { db, now, defaultUserId, forcedUserId }: McpCtx): void {
   server.registerTool(
@@ -36,7 +38,7 @@ export function registerSpendTools(server: McpServer, { db, now, defaultUserId, 
       const is_locked = period ? locks.length > 0 : null;
 
       if (fmt === 'csv') {
-        const currency = getMeta(db, 'currency') ?? 'kr';
+        const currency = getMeta(db, 'currency') ?? DEFAULT_CURRENCY;
         return okResult(`Exported CSV for ${period ?? 'all weeks'}.`, {
           period: period ?? 'all',
           currency,
@@ -135,6 +137,55 @@ export function registerSpendTools(server: McpServer, { db, now, defaultUserId, 
         `Locked week ${lock.period} (${lock.event_count} events, total ${lock.total_cents} minor units).`,
         { lock: { ...lock }, rev: getRev(db) },
       );
+    }),
+  );
+
+  server.registerTool(
+    'unlock_expense_week',
+    {
+      title: 'Unlock Expense Week',
+      description: 'Remove the lock on an ISO week (YYYY-Www) so its cost events can be added, edited, or undone again.',
+      inputSchema: {
+        period: LockPeriodBody.shape.period.describe('ISO week YYYY-Www (e.g. 2026-W46)'),
+      },
+      annotations: DESTRUCTIVE_ANNOTATIONS,
+    },
+    ({ period }) => runTool(() => {
+      unlockExpensePeriod(db, period);
+      return okResult(`Unlocked week ${period}.`, { period, rev: getRev(db) });
+    }),
+  );
+  server.registerTool(
+    'get_settle_up',
+    {
+      title: 'Get Settle-Up',
+      description: 'Who owes whom since the last settlement: paid minus ate per user (positive = the household owes them), plus suggested transfers. Minor currency units.',
+      inputSchema: {},
+      annotations: READ_ANNOTATIONS,
+    },
+    () => runTool(() => {
+      const settle = settleInfo(db);
+      const transfers = settleTransfers(settle.balances);
+      return okResult(`${transfers.length} transfer(s) to settle up.`, { ...settle, transfers });
+    }),
+  );
+
+  server.registerTool(
+    'settle_up',
+    {
+      title: 'Mark Settled',
+      description: 'Record that the household settled up now: balances restart at zero. Does not move money and ignores week locks.',
+      inputSchema: {
+        user_id: z.number().int().positive().optional().describe('User ID recording it (optional when household has 1 user)'),
+        note: z.string().trim().max(200).optional().describe('Optional note'),
+      },
+      annotations: DESTRUCTIVE_ANNOTATIONS,
+    },
+    (args) => runTool(() => {
+      const nowMs = now();
+      const uid = resolveUserId(db, args.user_id, defaultUserId, forcedUserId);
+      settleUp(db, uid, args.note || null, nowMs);
+      return okResult('Marked settled.', { since: nowMs, user_id: uid, rev: getRev(db) });
     }),
   );
 }

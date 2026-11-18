@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, expect, test } from 'vitest';
-import { sha256 } from '../src/server/auth.ts';
+import { rotateCode, sha256 } from '../src/server/auth.ts';
 import { openDb } from '../src/server/db.ts';
 import { createApp } from '../src/server/routes.ts';
 import type { State } from '../src/shared/types.ts';
@@ -263,7 +263,7 @@ test('nutrition snapshots on eat, daily_nutrition aggregation, and me/settings u
     lines: [{ item_id: oatsId, qty: 100 }],
   });
   expect(s1.events[0]!.lines[0]).toMatchObject({ item_id: oatsId, qty: -100, kcal: 370, protein_g: 13 });
-  expect(s1.daily_nutrition).toEqual([{ day: '1970-01-01', user_id: s1.me.id, kcal: 370, protein_g: 13, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1 }]);
+  expect(s1.daily_nutrition).toEqual([{ day: '1970-01-01', user_id: s1.me.id, kcal: 370, protein_g: 13, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 1, no_kcal: 0 }]);
 
   // Editing item macros later does not alter historical snapshot
   await st('PATCH', `/api/items/${oatsId}`, { kcal_per_unit: 10 });
@@ -302,4 +302,69 @@ test('expiry updates on buy: sets shelf_life_days or min(existing, new) when in 
     lines: [{ item_id: milkId, qty: 1000, expires_at: '1970-01-04' }],
   });
   expect(s.items.find(i => i.id === milkId)!.expires_at).toBe('1970-01-04');
+});
+
+test('Data: archived items restore, a name clash is refused, aliases delete, both bump rev', async () => {
+  let s = await st('GET', '/api/state');
+  const eggs = idOf(s, 'Eggs');
+  db.prepare('INSERT INTO aliases(text, item_id) VALUES (?, ?)').run('eggs 10 pack', eggs);
+  await st('DELETE', `/api/items/${eggs}`);
+  let data = await (await req('GET', '/api/data')).json();
+  expect(data.archived.map((i: { name: string }) => i.name)).toEqual(['Eggs']);
+  expect(data.aliases).toEqual([{ text: 'eggs 10 pack', item_id: eggs, item_name: 'Eggs', emoji: '🥚' }]);
+
+  const rev = s.rev;
+  s = await st('POST', `/api/items/${eggs}/restore`);
+  expect(s.rev).toBeGreaterThan(rev);
+  expect(s.items.map(i => i.name)).toContain('Eggs');
+  expect((await req('POST', `/api/items/${eggs}/restore`)).status).toBe(409); // not archived any more
+  expect((await req('POST', '/api/items/999/restore')).status).toBe(404);
+
+  // the unique index normally prevents a clash; drop it to prove the check holds on legacy data
+  await st('DELETE', `/api/items/${eggs}`);
+  db.exec('DROP INDEX items_name_owner');
+  db.prepare("INSERT INTO items(name, name_key, emoji, category, unit, step, pack_size, created_at) VALUES ('Eggs', 'eggs', '🥚', 'dairy', 'pc', 1, 10, 0)").run();
+  const r = await req('POST', `/api/items/${eggs}/restore`);
+  expect(r.status).toBe(409);
+  expect((await r.json()).error).toContain('There is already an item called Eggs');
+  expect(db.prepare('SELECT archived_at FROM items WHERE id = ?').get(eggs)).not.toEqual({ archived_at: null });
+
+  const before = (await st('GET', '/api/state')).rev;
+  s = await st('DELETE', `/api/aliases/${encodeURIComponent('eggs 10 pack')}`);
+  expect(s.rev).toBeGreaterThan(before);
+  expect((await req('DELETE', `/api/aliases/${encodeURIComponent('eggs 10 pack')}`)).status).toBe(404);
+  data = await (await req('GET', '/api/data')).json();
+  expect(data.aliases).toEqual([]);
+});
+
+test('Data: unlocking a week frees it, an unlocked week is a 404, a bad week is a 400', async () => {
+  const week = '2026-W03'; // clock is 1970; the lock only records the week
+  await st('POST', '/api/expenses/lock', { period: week });
+  let s = await st('GET', '/api/state');
+  expect(s.expense_locks.map(l => l.period)).toEqual([week]);
+  const rev = s.rev;
+  s = await st('DELETE', `/api/expenses/lock/${week}`);
+  expect(s.expense_locks).toEqual([]);
+  expect(s.rev).toBeGreaterThan(rev);
+  expect((await req('DELETE', `/api/expenses/lock/${week}`)).status).toBe(404);
+  expect((await req('DELETE', '/api/expenses/lock/nope')).status).toBe(400);
+  expect((await app.request(`/api/expenses/lock/${week}`, { method: 'DELETE' })).status).toBe(400); // no X-MyFood header
+});
+
+test('new access code: old code stops working, this session stays, other sessions of the user end', async () => {
+  const other = (await req('POST', '/api/login', { code: 'aaaa-aaaa-aaaa' })).headers.get('set-cookie')!.split(';')[0]!;
+  const bob = cookie.bob!;
+  const r = await req('POST', '/api/me/code');
+  expect(r.status).toBe(200);
+  const { code, state } = await r.json();
+  expect(code).toMatch(/^[a-z0-9]{4}(-[a-z0-9]{4}){2}$/);
+  expect(state.me.name).toBe('Alice');
+  expect((await req('GET', '/api/state')).status).toBe(200); // this session
+  expect((await app.request('/api/state', { headers: { cookie: other } })).status).toBe(401);
+  expect((await app.request('/api/state', { headers: { cookie: bob } })).status).toBe(200); // someone else's session
+  expect((await req('POST', '/api/login', { code: 'aaaa-aaaa-aaaa' })).status).toBe(401);
+  expect((await req('POST', '/api/login', { code })).status).toBe(200);
+  expect((await app.request('/api/me/code', { method: 'POST', headers: { 'X-MyFood': '1' } })).status).toBe(401);
+  expect(rotateCode(db, 1)).not.toBe(code); // the seed script's path: no session kept
+  expect((await req('GET', '/api/state')).status).toBe(401);
 });

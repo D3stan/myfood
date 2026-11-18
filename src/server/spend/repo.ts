@@ -1,8 +1,11 @@
-import { isoDate, isoWeek, weekRange } from '../../shared/dates.ts';
-import type { ExpenseBody, LockPeriodBody, Source } from '../../shared/types.ts';
+import { DEFAULT_CURRENCY } from '../../shared/currency.ts';
+import { dayRangeMs, isoDate, isoWeek, weekRange } from '../../shared/dates.ts';
+import type { ExpenseBody, LockPeriodBody, Settle, Source, SpendStats } from '../../shared/types.ts';
 import { all, bumpRev, get, getMeta, run, transaction } from '../db.ts';
 import type { Db } from '../db.ts';
-import { assertPeriodUnlocked, fail, insertEvent } from '../domain.ts';
+import { fail } from '../domain.ts';
+import { assertPeriodUnlocked, insertEvent } from '../events/repo.ts';
+import { dailyNutrition } from '../nutrition/repo.ts';
 
 export function addExpense(db: Db, userId: number, body: ExpenseBody, now: number): void {
   transaction(db, () => {
@@ -22,6 +25,62 @@ export function addExpense(db: Db, userId: number, body: ExpenseBody, now: numbe
       countsNutrition: false,
       lines: [],
     });
+    bumpRev(db);
+  });
+}
+
+/** Per-day, per-user paid cents and eaten value for the inclusive local dates `from`..`to` (already validated). */
+export function spendStats(db: Db, from: string, to: string): SpendStats {
+  const { fromMs, toMs } = dayRangeMs(from, to);
+  const paid = new Map<string, { day: string; user_id: number; cents: number }>();
+  for (const e of all<{ at: number; user_id: number; cost_cents: number }>(
+    db,
+    'SELECT at, user_id, cost_cents FROM events WHERE undone_at IS NULL AND cost_cents > 0 AND at >= ? AND at < ?',
+    fromMs,
+    toMs,
+  )) {
+    const day = isoDate(e.at), key = `${day}:${e.user_id}`;
+    const cur = paid.get(key) ?? { day, user_id: e.user_id, cents: 0 };
+    cur.cents += e.cost_cents;
+    paid.set(key, cur);
+  }
+  return {
+    from,
+    to,
+    paid: [...paid.values()].sort((a, b) => a.day.localeCompare(b.day) || a.user_id - b.user_id),
+    ate: dailyNutrition(db, fromMs, undefined, toMs)
+      .filter(d => d.value_cents > 0 || d.unpriced > 0)
+      .map(({ day, user_id, value_cents, unpriced }) => ({ day, user_id, value_cents, unpriced }))
+      .sort((a, b) => a.day.localeCompare(b.day) || a.user_id - b.user_id),
+  };
+}
+
+/** Paid and ate per user since the last settlement; the unpriced count tells the UI that "ate" is a lower bound. */
+export function settleInfo(db: Db): Settle {
+  const since = get<{ at: number | null }>(db, 'SELECT MAX(at) AS at FROM settlements')?.at ?? null;
+  const eaten = "e.user_id = u.id AND e.undone_at IS NULL AND e.kind = 'eat' AND e.counts_nutrition = 1 AND l.is_set = 0 AND e.at > ?";
+  const from = since ?? 0;
+  const balances = all<{ user_id: number; paid_cents: number; ate_cents: number }>(
+    db,
+    `SELECT u.id AS user_id,
+       COALESCE((SELECT SUM(cost_cents) FROM events WHERE user_id = u.id AND undone_at IS NULL AND cost_cents IS NOT NULL AND at > ?), 0) AS paid_cents,
+       COALESCE((SELECT SUM(l.value_cents) FROM event_lines l JOIN events e ON e.cid = l.event_cid WHERE ${eaten}), 0) AS ate_cents
+     FROM users u ORDER BY u.id`,
+    from,
+    from,
+  ).map(b => ({ ...b, balance_cents: b.paid_cents - b.ate_cents }));
+  const unpriced = get<{ n: number }>(
+    db,
+    `SELECT COUNT(*) AS n FROM event_lines l JOIN events e ON e.cid = l.event_cid JOIN users u ON u.id = e.user_id WHERE l.value_cents IS NULL AND ${eaten}`,
+    from,
+  )!.n;
+  return { since, balances, unpriced };
+}
+
+/** Balances start at zero afterwards. Independent of week locks. */
+export function settleUp(db: Db, userId: number, note: string | null, now: number): void {
+  transaction(db, () => {
+    run(db, 'INSERT INTO settlements(at, by_user_id, note) VALUES (?, ?, ?)', now, userId, note);
     bumpRev(db);
   });
 }
@@ -54,6 +113,13 @@ export function lockExpensePeriod(db: Db, userId: number, body: LockPeriodBody, 
   });
 }
 
+export function unlockExpensePeriod(db: Db, period: string): void {
+  transaction(db, () => {
+    if (!run(db, 'DELETE FROM expense_locks WHERE period = ?', period).changes) fail(404, `Week ${period} is not locked`);
+    bumpRev(db);
+  });
+}
+
 function csvCell(v: string | number | null | undefined): string {
   const s = v == null ? '' : String(v);
   const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
@@ -64,7 +130,7 @@ export function exportExpenses(
   db: Db,
   opts: { period?: string; format: 'csv' | 'json' },
 ): { contentType: string; filename: string; body: string } {
-  const currency = getMeta(db, 'currency') ?? 'kr';
+  const currency = getMeta(db, 'currency') ?? DEFAULT_CURRENCY;
   let rows: { cid: string; at: number; user_id: number; user_name: string; source: Source; note: string | null; cost_cents: number }[];
   if (opts.period) {
     const range = weekRange(opts.period);
