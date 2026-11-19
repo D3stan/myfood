@@ -175,4 +175,16 @@ export function migrate(db: Db): void {
       db.exec(`CREATE TABLE IF NOT EXISTS settlements (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, by_user_id INTEGER NOT NULL REFERENCES users(id), note TEXT); PRAGMA user_version = 6`);
     });
   }
+  if (version < 7) {
+    transaction(db, () => {
+      const ins = db.prepare('INSERT OR IGNORE INTO stores(id, name, emoji, sources) VALUES (?, ?, ?, ?)');
+      for (const [id, name, emoji, dealer_id] of [['netto-dk', 'Netto', '🟡', '9ba51'], ['lidl-dk', 'Lidl', '🔵', '71c90'], ['coop365-dk', 'Coop 365', '🟢', 'DWZE1w']]) {
+        ins.run(id!, name!, emoji!, JSON.stringify([{ provider: 'tjek', config: { dealer_id } }]));
+      }
+      for (const [k, v] of [['deals_lat', '55.6761'], ['deals_lng', '12.5683'], ['deals_radius_m', '5000']]) {
+        db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)').run(k!, v!);
+      }
+      db.exec('PRAGMA user_version = 7');
+    });
+  }
 }

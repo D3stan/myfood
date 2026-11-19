@@ -17,6 +17,7 @@ export interface RouteDeps {
   id: (c: Context) => number;
   pushLow: (prevStocks: Map<number, number>) => Promise<void>;
   lookupBarcode?: BarcodeLookupFn;
+  fetch?: typeof fetch;
 }
 
 /** Validated `?from&to` of the stats endpoints. */

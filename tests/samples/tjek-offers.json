@@ -1,0 +1,515 @@
+[
+ {
+  "id": "AMPWbKju6GzyrjES58LD_",
+  "ern": "ern:offer:AMPWbKju6GzyrjES58LD_",
+  "heading": "Faxe Kondi eller Pepsi Max sodavand",
+  "description": "SPOT\n1,5 liter. + pant.\nPr. liter 6,67\nMax. 6 stk. pr. variant pr. kunde pr. dag til denne pris",
+  "catalog_page": 1,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 10,
+   "pre_price": null,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "l",
+    "si": {
+     "symbol": "l",
+     "factor": 1
+    }
+   },
+   "size": {
+    "from": 1.5,
+    "to": 1.5
+   },
+   "pieces": {
+    "from": 1,
+    "to": 1,
+    "min": null,
+    "max": 6
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ },
+ {
+  "id": "Mv6eFaz91LpWbNo2qA1FO",
+  "ern": "ern:offer:Mv6eFaz91LpWbNo2qA1FO",
+  "heading": "ØGO økologiske æg",
+  "description": "10 stk. Str. M/L. Pr. stk. 3,00",
+  "catalog_page": 5,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 30,
+   "pre_price": null,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "pcs",
+    "si": {
+     "symbol": "pcs",
+     "factor": 1
+    }
+   },
+   "size": {
+    "from": 10,
+    "to": 10
+   },
+   "pieces": {
+    "from": 1,
+    "to": 1,
+    "min": null,
+    "max": null
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ },
+ {
+  "id": "fJLCKo2d1l5gkP1IWYsq9",
+  "ern": "ern:offer:fJLCKo2d1l5gkP1IWYsq9",
+  "heading": "Arla Protein drik",
+  "description": "500 ml. Jordbær/ hindbær eller chokoladesmag. Pr. liter 24,00\n+ PRIS 8,- Pr. liter 16,00\nGælder kun med Netto+ appen",
+  "catalog_page": 4,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 12,
+   "pre_price": null,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "ml",
+    "si": {
+     "symbol": "l",
+     "factor": 0.001
+    }
+   },
+   "size": {
+    "from": 500,
+    "to": 500
+   },
+   "pieces": {
+    "from": 1,
+    "to": 1,
+    "min": null,
+    "max": null
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ },
+ {
+  "id": "Kgs1qguRGENOVImO8NZNN",
+  "ern": "ern:offer:Kgs1qguRGENOVImO8NZNN",
+  "heading": "Linie Aquavit, Baileys saltkaramel eller pistacie",
+  "description": "50-70 cl. Pr. liter max. 198,00",
+  "catalog_page": 3,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 99,
+   "pre_price": null,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "cl",
+    "si": {
+     "symbol": "l",
+     "factor": 0.01
+    }
+   },
+   "size": {
+    "from": 50,
+    "to": 70
+   },
+   "pieces": {
+    "from": 1,
+    "to": 1,
+    "min": null,
+    "max": null
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ },
+ {
+  "id": "x0TlwOkv0qk8loc8mNiHC",
+  "ern": "ern:offer:x0TlwOkv0qk8loc8mNiHC",
+  "heading": "Ovnklar dansk flæskesteg",
+  "description": "PR. 1/2 KG\nUden ben.\nPr. kg 33,90",
+  "catalog_page": 10,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 16.95,
+   "pre_price": null,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "kg",
+    "si": {
+     "symbol": "kg",
+     "factor": 1
+    }
+   },
+   "size": {
+    "from": 0.5,
+    "to": 0.5
+   },
+   "pieces": {
+    "from": 1,
+    "to": 1,
+    "min": null,
+    "max": null
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ },
+ {
+  "id": "exngT6YHEimJtOrYk5uxK",
+  "ern": "ern:offer:exngT6YHEimJtOrYk5uxK",
+  "heading": "Faxe Kondi eller Pepsi Max sodavand",
+  "description": "PRISEN GÆLDER KUN VED KØB AF HELE FORPAKNINGER. 24 x 33 cl. + pant. Pr. liter 9,47. Max. 6 stk. pr. variant pr. kunde pr. dag til denne pris",
+  "catalog_page": 21,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 75,
+   "pre_price": null,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "cl",
+    "si": {
+     "symbol": "l",
+     "factor": 0.01
+    }
+   },
+   "size": {
+    "from": 33,
+    "to": 33
+   },
+   "pieces": {
+    "from": 24,
+    "to": 24,
+    "min": null,
+    "max": 6
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ },
+ {
+  "id": "dldL5kjdvk4WBGl2ayi-R",
+  "ern": "ern:offer:dldL5kjdvk4WBGl2ayi-R",
+  "heading": "Monster Energy eller Coca-Cola",
+  "description": "ENERGIDRIKKE IKKE EGNET TIL BØRN. PRISEN GÆLDER KUN VED KØB AF HELE FORPAKNINGER. PRISEN GÆLDER HELE NOVEMBER. 8 x 50 cl. 24 x 25 cl. + pant. Pr. liter max 19,75",
+  "catalog_page": 21,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 79,
+   "pre_price": null,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "cl",
+    "si": {
+     "symbol": "l",
+     "factor": 0.01
+    }
+   },
+   "size": {
+    "from": 25,
+    "to": 50
+   },
+   "pieces": {
+    "from": 8,
+    "to": 24,
+    "min": null,
+    "max": null
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-10-31T23:00:00+0000",
+  "run_till": "2026-11-30T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ },
+ {
+  "id": "nvJSuf5MT5jvH9oT8PAZA",
+  "ern": "ern:offer:nvJSuf5MT5jvH9oT8PAZA",
+  "heading": "KiMs chips",
+  "description": "125-160g. Pr. kg max. 96,00",
+  "catalog_page": 3,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 12,
+   "pre_price": null,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "g",
+    "si": {
+     "symbol": "kg",
+     "factor": 0.001
+    }
+   },
+   "size": {
+    "from": 125,
+    "to": 160
+   },
+   "pieces": {
+    "from": 1,
+    "to": 1,
+    "min": null,
+    "max": null
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ },
+ {
+  "id": "Fzx-PT91eKq_xiND1qATo",
+  "ern": "ern:offer:Fzx-PT91eKq_xiND1qATo",
+  "heading": "Brunchy bacon i skiver",
+  "description": "100 g.\nPr. kg 59,70\nNormalpris 12.-\nMax. 6 stk. pr. kunde pr. dag til 5,97",
+  "catalog_page": 16,
+  "catalog_view_id": null,
+  "pricing": {
+   "price": 5.97,
+   "pre_price": 12,
+   "currency": "DKK"
+  },
+  "quantity": {
+   "unit": {
+    "symbol": "g",
+    "si": {
+     "symbol": "kg",
+     "factor": 0.001
+    }
+   },
+   "size": {
+    "from": 100,
+    "to": 100
+   },
+   "pieces": {
+    "from": 1,
+    "to": 1,
+    "min": null,
+    "max": 6
+   }
+  },
+  "links": {
+   "webshop": null
+  },
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "dealer_url": "https://squid-api.tjek.com/v2/dealers/9ba51",
+  "dealer_id": "9ba51",
+  "store_url": null,
+  "store_id": null,
+  "catalog_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE",
+  "catalog_id": "Bswgx2rE",
+  "branding": {
+   "name": "Netto",
+   "website": "https://netto.dk/",
+   "description": "Netto har altid stærke tilbud. Hold dig opdateret Vi holder dig opdateret på Nettos ugentlige tilbud. Hold dig derfor altid opdateret med deres tilbudsavis lige her.",
+   "color": "FFD950",
+   "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2FzvP5c3dxng13VGEQ2j6wd&w=160&s=8dab1d57edce8f8cedf222ba9ee19ae4",
+   "pageflip": {
+    "color": "FFD950",
+    "logo": "https://image-transformer-api.tjek.com/?u=s3%3A%2F%2Fsgn-prd-assets%2Fuploads%2F9ba51%2Ff6eUealpNeW-owqLp5Zg1&w=160&s=5463e070a25224f76d4769b2b12355ad"
+   }
+  },
+  "category_ids": []
+ }
+]

@@ -215,7 +215,7 @@ test('openDb migrates an existing v1 database idempotently without losing rows',
     raw.close();
 
     const db = openDb(file);
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 7 });
     // v4 adds item price and eat-line value: old rows read NULL (unknown)
     expect(db.prepare('SELECT cost_per_unit_cents FROM items').get()).toEqual({ cost_per_unit_cents: null });
     expect(db.prepare('SELECT value_cents, qty FROM event_lines').get()).toEqual({ value_cents: null, qty: 10 });
@@ -258,7 +258,7 @@ test('openDb migrates a v3 database to v4 keeping its rows, with price and value
     first.close();
 
     const db = openDb(file);
-    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 6 });
+    expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 7 });
     expect(db.prepare('SELECT carbs_per_unit, cost_per_unit_cents FROM items').get()).toEqual({ carbs_per_unit: 0.5, cost_per_unit_cents: null });
     expect(db.prepare('SELECT qty, cost_cents, carbs_g, value_cents FROM event_lines').get()).toEqual({ qty: -2, cost_cents: 900, carbs_g: 1, value_cents: null });
     db.close();
