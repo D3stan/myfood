@@ -121,6 +121,15 @@ describe('normalPrice', () => {
     expect(normalPrice(db, 2)).toEqual({ cents_per_unit: 3.5, basis: 'item' });
     expect(normalPrice(db, 3)).toBeNull();
   });
+
+  test('every priced buy was a promo: null, not the item price', () => {
+    const { db } = setup();
+    db.exec('UPDATE items SET cost_per_unit_cents = 1.2 WHERE id = 2');
+    buy(db, 'p', 10, 2, 500, 600, 2);
+    offer(db, { key: 'pasta deal', price: 600, unit: 'g', qty: 500, from: '2026-11-09', to: '2026-11-12' });
+    db.exec("INSERT INTO offer_matches VALUES ('pasta deal', 2, 500, 1, 'manual', 0)");
+    expect(normalPrice(db, 2)).toBeNull();
+  });
 });
 
 describe('routes', () => {

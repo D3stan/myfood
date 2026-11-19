@@ -315,7 +315,7 @@ export interface ItemDeal {
 }
 export interface ItemDeals { normal: NormalPrice | null; offers: ItemDeal[] }
 /** GET /api/deals/plan. Computed on every call, never stored. */
-export interface PlanTripItem { item_id: number; name: string; emoji: string; packs: number; unit_cents: number; saving_cents: number; reason: string; offer_title: string }
+export interface PlanTripItem { item_id: number; name: string; emoji: string; packs: number; unit_cents: number; saving_cents: number; reason: string; offer_title: string; qty_per_pack: number; price_cents: number }
 export interface PlanTrip { date: string; store_id: string; store_name: string; store_emoji: string; items: PlanTripItem[]; saving_cents: number }
 export interface PlanItem {
   item_id: number; name: string; emoji: string; rate: number | null; normal_cents: number | null; pct_off: number;

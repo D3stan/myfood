@@ -65,7 +65,7 @@ describe('buildPlan', () => {
     expect(p.today).toBe('2026-11-19');
     expect(p.trips).toHaveLength(1);
     expect(p.trips[0]).toMatchObject({ date: '2026-11-19', store_id: 'netto-dk', store_name: 'Netto', saving_cents: 1000 }); // 1000 ml x (2 - 1)
-    expect(p.trips[0]!.items[0]).toMatchObject({ item_id: 1, packs: 1, unit_cents: 1, offer_title: expect.stringContaining('Title') });
+    expect(p.trips[0]!.items[0]).toMatchObject({ item_id: 1, packs: 1, unit_cents: 1, offer_title: expect.stringContaining('Title'), qty_per_pack: 1000, price_cents: 1000 });
     expect(p.total_saving_cents).toBe(1000);
     expect(p.items[0]).toMatchObject({ item_id: 1, packs: 1, on_trip: true, pct_off: 50, rate: null });
     const st = (await (await req('GET', '/api/state')).json()) as State;
