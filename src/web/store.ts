@@ -2,7 +2,7 @@
 // Functions take the store as their first argument so they can be tested without a DOM.
 import { applyOps } from '../shared/stock.ts';
 import type { Frame } from '../shared/period.ts';
-import type { AiCook, AiEvent, BarcodeLookup, DataInfo, EventBody, ItemPrice, JobMode, PendingOp, State, StatsMap } from '../shared/types.ts';
+import type { AiCook, AiEvent, BarcodeLookup, DataInfo, EventBody, ItemDeals, ItemPrice, JobMode, PendingOp, State, StatsMap } from '../shared/types.ts';
 
 export type Tab = 'pantry' | 'spend' | 'history' | 'me';
 
@@ -54,6 +54,8 @@ export interface Ui {
   stats: { [K in keyof StatsMap]: Record<string, StatsMap[K] | null> };
   /** Item sheet price history by item id; refreshed whenever the sheet opens. */
   prices: Record<number, ItemPrice[]>;
+  /** Item sheet deals by item id; refreshed whenever the sheet opens. */
+  deals: Record<number, ItemDeals>;
   jobMode: JobMode;
   barcodeLookup: BarcodeLookup | null;
   barcodeBusy: boolean;
@@ -82,7 +84,7 @@ export const newStore = (server: State | null = null, pending: PendingOp[] = [])
   ui: {
     tab: 'pantry', page: [], sheet: null, f: {}, editing: null, toast: null,
     online: true, loggedOut: false, standalone: true, files: [], seenDone: new Set(),
-    ownerFilter: 'all', historyScope: 'me', spendScope: 'all', frames: {}, stats: { spend: {}, nutrition: {} }, prices: {}, jobMode: 'auto',
+    ownerFilter: 'all', historyScope: 'me', spendScope: 'all', frames: {}, stats: { spend: {}, nutrition: {} }, prices: {}, deals: {}, jobMode: 'auto',
     barcodeLookup: null, barcodeBusy: false,
     newToken: null, newCode: null, data: null, pushSupported: false, pushPermission: 'default',
     demo: false, tour: null,

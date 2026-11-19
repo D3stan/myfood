@@ -5,6 +5,7 @@ import type {
   CookBody,
   DataInfo,
   ExpenseBody,
+  ItemDeals,
   ItemPrice,
   JobMode,
   LockPeriodBody,
@@ -85,5 +86,6 @@ export const postJob = startJob;
 export const getStats = <K extends keyof StatsMap>(kind: K, from: string, to: string): Promise<StatsMap[K]> =>
   request<StatsMap[K]>('GET', `/api/stats/${kind}?from=${from}&to=${to}`);
 export const getItemPrices = (id: number): Promise<ItemPrice[]> => request<ItemPrice[]>('GET', `/api/items/${id}/prices`);
+export const getItemDeals = (id: number): Promise<ItemDeals> => request<ItemDeals>('GET', `/api/items/${id}/deals`);
 export const getData = (): Promise<DataInfo> => request<DataInfo>('GET', '/api/data');
 export const rotateCode = (): Promise<{ code: string; state: State }> => request<{ code: string; state: State }>('POST', '/api/me/code');

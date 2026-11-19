@@ -4,7 +4,7 @@ import { eventNutrition } from '../../../shared/nutrition.ts';
 import { levelParts, portionCount, shown } from '../../../shared/stock.ts';
 import { currencySymbol, fmtCost, fmtNum } from '../../../shared/text.ts';
 import { CATEGORIES, UNITS } from '../../../shared/types.ts';
-import type { Item, Unit } from '../../../shared/types.ts';
+import type { Item, ItemDeal, Unit } from '../../../shared/types.ts';
 import { qOf } from '../../store.ts';
 import type { Sheet } from '../../store.ts';
 import { VERB, clock, hourToTime, levelName, stepOf, unitOf, userOf } from './bits.ts';
@@ -97,6 +97,12 @@ export function itemSheet(v: V, sh: Sheet) {
     <p class="small muted center" style="margin:-2px 0 10px">${metaBits.join(' · ')}</p>
     ${(ui.prices[it.id] ?? []).length ? html`<div id="price-history" style="margin:0 0 10px"><p class="small muted center" style="margin:0 0 2px">Price history</p>
       ${ui.prices[it.id]!.map(p => html`<div class="row small"><span class="grow">${isoDate(p.at)}</span><span>${fmtCost(p.unit_cents * mult, st.currency)} / ${label}</span></div>`)}</div>` : ''}
+    ${(() => {
+      const d = (ui.deals[it.id]?.offers ?? []).reduce<ItemDeal | null>((b, o) => (!b || o.unit_cents < b.unit_cents ? o : b), null);
+      if (!d) return '';
+      const when = d.valid_from > isoDate(st.now) ? `from ${new Date(`${d.valid_from}T12:00`).toLocaleDateString('en', { weekday: 'short' })}` : 'now';
+      return html`<p id="deal" class="small center" style="margin:0 0 10px">🏷️ ${d.store_name} ${fmtCost(d.price_cents, st.currency)}${d.pct_off != null && d.pct_off > 0 ? ` · −${d.pct_off}%` : ''} · ${when}</p>`;
+    })()}
     ${owed > 0 ? html`<p class="debt-note">${fmtNum(owed)} ${it.unit} owed from earlier eats — Set exact amount to clear</p>` : ''}
     ${canPortion ? html`<div class="seg" role="group" aria-label="Unit mode" style="margin-bottom:10px">
       <button class="${usePortions ? 'on' : ''}" data-a="portionMode" data-v="1">Portions (${fmtNum(it.portion_g!)}g)</button>

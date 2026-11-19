@@ -31,6 +31,7 @@ if (demo) {
     if (path === '/api/data') return { aliases: [], archived: [] } as never;
     if (path.startsWith('/api/stats/')) return { paid: [], ate: [], rows: [] } as never;
     if (path.endsWith('/prices')) return [] as never;
+    if (path.endsWith('/deals')) return { normal: null, offers: [] } as never;
     const op = path === '/api/events' ? { type: 'event' as const, body: body as EventBody }
       : method === 'DELETE' && path.startsWith('/api/events/') ? { type: 'undo' as const, cid: path.split('/').pop()! } : null;
     st = { ...(op ? applyOps(st, [op]) : st), rev: st.rev + 1 };

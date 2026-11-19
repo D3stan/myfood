@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { serve } from '@hono/node-server';
 import { runAi } from './ai/agy.ts';
+import { matchOffersAi } from './deals/matcher.ts';
 import { openDb } from './db.ts';
 import { guestCode } from './guest.ts';
 import { checkExpiryPushes, ensureVapidKeys } from './push.ts';
@@ -27,6 +28,7 @@ const build = existsSync(buildFile) ? readFileSync(buildFile, 'utf8').trim() : '
 const app = createApp({
   db,
   runAi,
+  matchOffers: matchOffersAi(jobsDir),
   dataDir,
   jobsDir,
   build,

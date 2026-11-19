@@ -1,5 +1,5 @@
 // Stats for periods outside the 90-day window: fetched when a frame action lands on one, cached in ui.stats (never in State).
-import { getItemPrices, getStats } from '../api.ts';
+import { getItemDeals, getItemPrices, getStats } from '../api.ts';
 import { needsStats, periodRange } from '../../shared/period.ts';
 import type { Frame, Period } from '../../shared/period.ts';
 import type { StatsMap } from '../../shared/types.ts';
@@ -34,4 +34,5 @@ export function loadStats(k: string, redraw: () => void): void {
 export function loadPrices(id: number, redraw: () => void): void {
   if (!s.ui.online) return;
   getItemPrices(id).then(l => { s.ui.prices[id] = l; redraw(); }).catch(() => {});
+  getItemDeals(id).then(d => { s.ui.deals[id] = d; redraw(); }).catch(() => {});
 }

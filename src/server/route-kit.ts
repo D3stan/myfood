@@ -4,6 +4,7 @@ import { StatsQuery } from '../shared/types.ts';
 import type { State } from '../shared/types.ts';
 import type { BarcodeLookupFn } from './barcodes.ts';
 import type { Db } from './db.ts';
+import type { MatchOffers } from './deals/matcher.ts';
 
 export type AppEnv = { Variables: { uid: number } };
 
@@ -18,6 +19,7 @@ export interface RouteDeps {
   pushLow: (prevStocks: Map<number, number>) => Promise<void>;
   lookupBarcode?: BarcodeLookupFn;
   fetch?: typeof fetch;
+  matchOffers?: MatchOffers;
 }
 
 /** Validated `?from&to` of the stats endpoints. */
