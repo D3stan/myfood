@@ -8,7 +8,7 @@ import { aliasKey } from '../../shared/text.ts';
 import { all, get, getMeta, transaction } from '../db.ts';
 import { DEFAULT_CURRENCY } from '../../shared/currency.ts';
 import { fail } from '../domain.ts';
-import { IDEMPOTENT_WRITE_ANNOTATIONS, READ_ANNOTATIONS, WRITE_ANNOTATIONS, okResult, resolveUserId, runTool } from '../mcp-kit.ts';
+import { IDEMPOTENT_WRITE_ANNOTATIONS, READ_ANNOTATIONS, WRITE_ANNOTATIONS, okResult, resolveReadUserId, resolveUserId, runTool } from '../mcp-kit.ts';
 import type { McpCtx } from '../mcp-kit.ts';
 import { createEvent, hydrateEventByCid } from '../events/repo.ts';
 import { loadHydratedItems, requireActiveItems } from '../items/repo.ts';
@@ -27,6 +27,7 @@ export function registerDealsTools(server: McpServer, { db, now, defaultUserId, 
     },
     () => runTool(() => {
       const plan = buildPlan(db, now());
+      const viewer = resolveReadUserId(db, undefined, defaultUserId, forcedUserId); // shared items plus the caller's own, like get_state
       const { stores, lat, lng, radius_m } = dealsInfo(db, isoDate(now()));
       const unmatched = get<{ n: number }>(db, `SELECT COUNT(DISTINCT o.offer_key) AS n FROM offers o JOIN stores s ON s.id = o.store_id AND s.enabled = 1
         WHERE o.valid_to >= ? AND o.currency = ? AND o.offer_key NOT IN (SELECT offer_key FROM offer_matches)`, isoDate(now()), getMeta(db, 'currency') ?? DEFAULT_CURRENCY)!.n;
@@ -34,7 +35,7 @@ export function registerDealsTools(server: McpServer, { db, now, defaultUserId, 
         plan.trips.length
           ? `${plan.trips.length} trip(s), saving ${plan.total_saving_cents} minor units: ${plan.trips.map(t => `${t.date} ${t.store_name} (${t.items.length} items)`).join('; ')}.`
           : 'No shopping trip is worth planning right now.',
-        { ...plan, shopping_list_text: shoppingList(loadHydratedItems(db, now()).filter(i => i.is_low && i.owner_id == null), plan), stores, location: { lat, lng, radius_m }, unmatched_offer_count: unmatched },
+        { ...plan, shopping_list_text: shoppingList(loadHydratedItems(db, now()).filter(i => i.is_low && (i.owner_id == null || i.owner_id === viewer)), plan), stores, location: { lat, lng, radius_m }, unmatched_offer_count: unmatched },
       );
     }),
   );

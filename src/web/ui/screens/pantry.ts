@@ -18,7 +18,7 @@ export function heroPreset(presets: Preset[], events: FoodEvent[], now = new Dat
   return best;
 }
 
-export const shoppingText = (low: Item[], plan: DealsPlan | null = null): string => shoppingList(low, plan);
+export const shoppingText = (low: Item[], plan: DealsPlan | null = null, today?: string): string => shoppingList(low, plan, today ?? plan?.today);
 
 const level = (n: number) => {
   const { open, sealed } = levelParts(n);

@@ -235,4 +235,8 @@ describe('shoppingList', () => {
     expect(out).toBe('Shopping list\nToday · Netto\n- 2 × Butter\nAnywhere\n- Salt');
     expect(out).not.toMatch(/150|1500|500/);
   });
+  test('a stale cached plan: past trips are skipped and days are relative to the real today', () => {
+    const stale = { today: '2026-11-18', trips: [{ ...trip, date: '2026-11-18' }, { ...trip, date: '2026-11-20', store_name: 'Lidl' }] };
+    expect(shoppingList(low, stale, '2026-11-19')).toBe('Shopping list\nTomorrow · Lidl\n- 2 × Butter\nAnywhere\n- Salt');
+  });
 });

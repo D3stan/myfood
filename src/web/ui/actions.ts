@@ -47,7 +47,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   tab: el => { if (s.ui.page.length) history.go(-s.ui.page.length); s.ui.tab = el.dataset.tab as Tab; s.ui.page = []; window.scrollTo(0, 0); },
   close: () => closeSheet(s),
   share: async () => {
-    const text = shoppingText(visibleLowItems(st()), s.ui.dealsPlan ?? null);
+    const text = shoppingText(visibleLowItems(st()), s.ui.dealsPlan ?? null, isoDate(st().now));
     try { await navigator.share({ text }); }
     catch (e) {
       if ((e as Error).name === 'AbortError') return;

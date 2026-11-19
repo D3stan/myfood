@@ -177,13 +177,14 @@ export function tripDay(date: string, today: string): string {
 }
 
 /** The shareable shopping list: planned trip items grouped by day and store, other low items under "Anywhere". No prices. */
-export function shoppingList(low: { id: number; name: string }[], plan: { today: string; trips: PlanTrip[] } | null): string {
-  const trips = plan?.trips.filter(t => t.items.length) ?? [];
+/** `today` is the real date: a cached plan may be older, and its past trips are skipped. */
+export function shoppingList(low: { id: number; name: string }[], plan: { today: string; trips: PlanTrip[] } | null, today = plan?.today ?? ''): string {
+  const trips = plan?.trips.filter(t => t.items.length && t.date >= today) ?? [];
   const onTrip = new Set(trips.flatMap(t => t.items.map(i => i.item_id)));
   const rest = low.filter(i => !onTrip.has(i.id)).map(i => `- ${i.name}`);
   return [
     'Shopping list',
-    ...trips.flatMap(t => [`${tripDay(t.date, plan!.today)} · ${t.store_name}`, ...t.items.map(i => `- ${i.packs} × ${i.name}`)]),
+    ...trips.flatMap(t => [`${tripDay(t.date, today)} · ${t.store_name}`, ...t.items.map(i => `- ${i.packs} × ${i.name}`)]),
     ...(trips.length && rest.length ? ['Anywhere'] : []),
     ...rest,
   ].join('\n');
