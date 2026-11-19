@@ -3,7 +3,7 @@ import { addDays, daysUntil, parseIsoDate } from './dates.ts';
 import { nextStock } from './stock.ts';
 import { DEFAULT_CURRENCY } from './currency.ts';
 import { fmtCost } from './text.ts';
-import type { Category, Kind } from './types.ts';
+import type { Category, Kind, PlanTrip } from './types.ts';
 
 const DAY = 86_400_000;
 const WINDOW_DAYS = 30;
@@ -174,4 +174,18 @@ export function planTrips(
 export function tripDay(date: string, today: string): string {
   const n = daysUntil(date, parseIsoDate(today)!);
   return n <= 0 ? 'Today' : n === 1 ? 'Tomorrow' : parseIsoDate(date)!.toLocaleDateString('en-GB', { weekday: 'short' });
+}
+
+/** The shareable shopping list: planned trip items grouped by day and store, other low items under "Anywhere". No prices. */
+/** `today` is the real date: a cached plan may be older, and its past trips are skipped. */
+export function shoppingList(low: { id: number; name: string }[], plan: { today: string; trips: PlanTrip[] } | null, today = plan?.today ?? ''): string {
+  const trips = plan?.trips.filter(t => t.items.length && t.date >= today) ?? [];
+  const onTrip = new Set(trips.flatMap(t => t.items.map(i => i.item_id)));
+  const rest = low.filter(i => !onTrip.has(i.id)).map(i => `- ${i.name}`);
+  return [
+    'Shopping list',
+    ...trips.flatMap(t => [`${tripDay(t.date, today)} · ${t.store_name}`, ...t.items.map(i => `- ${i.packs} × ${i.name}`)]),
+    ...(trips.length && rest.length ? ['Anywhere'] : []),
+    ...rest,
+  ].join('\n');
 }

@@ -2,7 +2,8 @@ import { html } from '../../html.ts';
 import { daysUntil } from '../../../shared/dates.ts';
 import { isExpiringSoon, isLow, levelParts, portionCount, shown } from '../../../shared/stock.ts';
 import { fmtNum } from '../../../shared/text.ts';
-import type { FoodEvent, Item, Job, Preset } from '../../../shared/types.ts';
+import { shoppingList } from '../../../shared/deals.ts';
+import type { DealsPlan, FoodEvent, Item, Job, Preset } from '../../../shared/types.ts';
 import { expiryLabel, levelName, ownerOf } from '../components/bits.ts';
 import type { V } from '../components/bits.ts';
 import { dealsStrip } from '../deals/screen.ts';
@@ -17,7 +18,7 @@ export function heroPreset(presets: Preset[], events: FoodEvent[], now = new Dat
   return best;
 }
 
-export const shoppingText = (low: Item[]): string => ['Shopping list', ...low.map(i => `- ${i.name}`)].join('\n');
+export const shoppingText = (low: Item[], plan: DealsPlan | null = null, today?: string): string => shoppingList(low, plan, today ?? plan?.today);
 
 const level = (n: number) => {
   const { open, sealed } = levelParts(n);

@@ -823,6 +823,7 @@ describe('deals UI', () => {
     const deals = appHtml(s, new Date(fixture.now));
     expect(deals).toContain('Eggs');
     expect(deals).toContain('data-a="syncDeals"');
+    expect(deals).toContain('data-a="share"');
     expect(deals).toContain('data-a="boughtTrip"');
     s.ui.dealsPlan!.trips[0]!.date = '2999-01-01';
     expect(appHtml(s, new Date(fixture.now))).not.toContain('data-a="boughtTrip"');

@@ -14,7 +14,7 @@ export function dealsPage({ st, ui }: V) {
   const p = ui.dealsPlan, off = ui.online ? '' : 'disabled';
   const money = (c: number) => fmtCost(Math.round(c), st.currency);
   return html`
-    <div class="row" style="margin-bottom:8px"><button id="deals-sync" class="btn alt right" data-a="syncDeals" ${off}>Sync now</button></div>
+    <div class="row" style="margin-bottom:8px"><button id="deals-share" class="btn alt" data-a="share">Share list</button><button id="deals-sync" class="btn alt right" data-a="syncDeals" ${off}>Sync now</button></div>
     ${!p ? html`<p class="small muted">Loading…</p>` : html`
       ${p.trips.length ? (p.total_saving_cents > 0 ? html`<p id="deals-total" class="small" style="margin:0 0 8px">Total saving <b>${money(p.total_saving_cents)}</b></p>` : '') : html`<p class="note">No shopping trip is worth planning right now.</p>`}
       ${p.trips.map((t, n) => html`<div class="card" id="trip-${n}">

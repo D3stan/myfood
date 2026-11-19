@@ -65,6 +65,7 @@ test('get_state carries deals_summary; get_shopping_plan adds stores, location a
   expect(plan.stores[0]).toHaveProperty('last_synced_at');
   expect(plan.location).toEqual({ lat: Number(getMeta(db, 'deals_lat')), lng: Number(getMeta(db, 'deals_lng')), radius_m: Number(getMeta(db, 'deals_radius_m')) });
   expect(plan.unmatched_offer_count).toBe(1);
+  expect(plan.shopping_list_text).toMatch(/^Shopping list\nToday · Netto\n- \d+ × Milk/);
   expect(data(await call(await connect(), 'get_state')).deals_summary).not.toBeUndefined();
 });
 
