@@ -403,6 +403,18 @@ describe('demo deals', () => {
     expect(eggs.offers).toHaveLength(1);
   });
 
+  test('after Bought these the trip leaves the plan and the Pantry strip', async () => {
+    const st = createDemoState(Date.now());
+    const call = createDemoApi(st);
+    const trip = (await call('GET', '/api/deals/plan') as DealsPlan).trips[0]!;
+    const after = await call('POST', '/api/events', {
+      cid: 'demo-trip-0001', at: Date.now(), kind: 'buy', note: trip.store_name,
+      lines: trip.items.map(i => ({ item_id: i.item_id, qty: i.packs * i.qty_per_pack, cost_cents: i.packs * i.price_cents })),
+    }) as State;
+    expect(after.deals_summary).toBeNull();
+    expect((await call('GET', '/api/deals/plan') as DealsPlan).trips).toHaveLength(0);
+  });
+
   test('tour has a deals step whose target is in the rendered pantry', () => {
     const step = TOUR_STEPS.find(t => t.selectors.includes('#deals-strip'))!;
     expect(step.tab).toBe('pantry');

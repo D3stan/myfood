@@ -747,7 +747,15 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
   const archivedItems = new Map<number, { item: Item; archived_at: number }>();
   let settleSince: number | null = st.settle.since;
 
+  // A trip already logged today (the "Bought these" buy) drops off the plan, and the Pantry strip follows it.
+  const livePlan = (): DealsPlan => {
+    const d = demoDeals(st.now).plan;
+    const trips = d.trips.filter(t => !st.events.some(e => e.kind === 'buy' && e.note === t.store_name && isoDate(new Date(e.at)) === d.today));
+    return { ...d, trips, items: d.items.filter(i => !i.on_trip || trips.some(t => t.store_id === i.store_id)), total_saving_cents: trips.reduce((n, t) => n + t.saving_cents, 0) };
+  };
   const syncDerived = () => {
+    const t = livePlan().trips[0];
+    st.deals_summary = t ? { date: t.date, store_name: t.store_name, store_emoji: t.store_emoji, saving_cents: t.saving_cents, deal_count: t.items.length } : null;
     st.items = sortItems(st.items);
     st.events.sort((a, b) => b.at - a.at);
     st.expenses = st.events.filter(e => e.cost_cents != null);
@@ -1249,10 +1257,7 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
 
     if (path.startsWith('/api/deals/')) {
       if (method === 'GET' && path === '/api/deals/plan') {
-        const d = demoDeals(st.now).plan;
-        // A trip already logged today (the "Bought these" buy) drops off the plan.
-        const trips = d.trips.filter(t => !st.events.some(e => e.kind === 'buy' && e.note === t.store_name && isoDate(new Date(e.at)) === d.today));
-        return { ...d, trips, items: d.items.filter(i => !i.on_trip || trips.some(t => t.store_id === i.store_id)), total_saving_cents: trips.reduce((n, t) => n + t.saving_cents, 0) } satisfies DealsPlan;
+        return livePlan();
       }
       if (method === 'GET' && path === '/api/deals/catalogs') return { stores: dealStores, catalogs: demoDeals(st.now).catalogs, lat: dealLoc.lat, lng: dealLoc.lng, radius_m: dealLoc.radius_m } satisfies DealsInfo;
       if (method === 'POST' && path === '/api/deals/sync') return { stores: dealStores.map(x => ({ id: x.id, offers: 0 })), newOffers: 0 };
