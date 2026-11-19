@@ -23,7 +23,7 @@ export const dealsActions: Record<string, (el: HTMLElement) => void | Promise<un
   },
   // Queued like any other buy (works offline); the offer price is what gets logged, a scanned receipt stays the precise record.
   boughtTrip: async el => {
-    const p = s.ui.dealsPlan, t = p?.trips[Number(el.dataset.n)];
+    const p = s.ui.dealsPlan, t = p?.trips.find(x => x.date === p.today && x.store_id === el.dataset.store);
     if (!p || !t || t.date !== p.today) return;
     const cid = enqueueEvent(s, { kind: 'buy', note: t.store_name, lines: t.items.map(i => ({ item_id: i.item_id, qty: i.packs * i.qty_per_pack, cost_cents: i.packs * i.price_cents })) });
     s.ui.dealsPlan = { ...p, trips: p.trips.filter(x => x !== t) };

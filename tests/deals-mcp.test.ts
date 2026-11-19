@@ -97,6 +97,16 @@ describe('log_trip', () => {
     expect(lines()).toEqual([{ item_id: 1, qty: 3000, cost_cents: 3000 }]);
   });
 
+  test('a retried call with the same cid logs once; archived items are rejected', async () => {
+    item(1, 'Milk'); offer('arla mini mælk');
+    const c = await connect();
+    data(await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk', cid: 'trip-0001' }));
+    data(await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk', cid: 'trip-0001' }));
+    expect(events()).toHaveLength(1);
+    db.exec('UPDATE items SET archived_at = 1 WHERE id = 1');
+    expect((await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk', items: [{ item_id: 1, packs: 1 }] })).isError).toBe(true);
+  });
+
   test('a locked week is an error and logs nothing', async () => {
     item(1, 'Milk'); offer('arla mini mælk');
     const c = await connect();

@@ -846,7 +846,7 @@ describe('deals UI', () => {
       generated_at: 0, today: isoDate(fixture.now), total_saving_cents: 0, items: [],
       trips: [{ date: isoDate(fixture.now), store_id: 'netto-dk', store_name: 'Netto', store_emoji: '🟡', saving_cents: 0, items: [{ item_id: 1, name: 'Eggs', emoji: '🥚', packs: 2, unit_cents: 150, saving_cents: 0, reason: '', offer_title: 'Eggs 10 pk', qty_per_pack: 10, price_cents: 1500 }] }],
     };
-    await actions.boughtTrip!({ dataset: { n: '0' } } as unknown as HTMLElement);
+    await actions.boughtTrip!({ dataset: { store: 'netto-dk' } } as unknown as HTMLElement);
     expect(s.pending).toHaveLength(1);
     expect(s.pending[0]).toMatchObject({ type: 'event', body: { kind: 'buy', note: 'Netto', lines: [{ item_id: 1, qty: 20, cost_cents: 3000 }] } });
     expect(s.ui.dealsPlan!.trips).toHaveLength(0);
