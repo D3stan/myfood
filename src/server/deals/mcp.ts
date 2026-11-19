@@ -24,7 +24,8 @@ export function registerDealsTools(server: McpServer, { db, now, fetch: fetchFn,
     () => runTool(() => {
       const plan = buildPlan(db, now());
       const { stores, lat, lng, radius_m } = dealsInfo(db, isoDate(now()));
-      const unmatched = get<{ n: number }>(db, 'SELECT COUNT(DISTINCT offer_key) AS n FROM offers WHERE valid_to >= ? AND offer_key NOT IN (SELECT offer_key FROM offer_matches)', isoDate(now()))!.n;
+      const unmatched = get<{ n: number }>(db, `SELECT COUNT(DISTINCT o.offer_key) AS n FROM offers o JOIN stores s ON s.id = o.store_id AND s.enabled = 1
+        WHERE o.valid_to >= ? AND o.currency = ? AND o.offer_key NOT IN (SELECT offer_key FROM offer_matches)`, isoDate(now()), getMeta(db, 'currency') ?? DEFAULT_CURRENCY)!.n;
       return okResult(
         plan.trips.length
           ? `${plan.trips.length} trip(s), saving ${plan.total_saving_cents} minor units: ${plan.trips.map(t => `${t.date} ${t.store_name} (${t.items.length} items)`).join('; ')}.`
