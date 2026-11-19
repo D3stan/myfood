@@ -305,7 +305,7 @@ export async function checkDealsPushes(
     .digest('hex').slice(0, 12);
   if (!claimDedupeKey(db, `deals:${hash}`, now)) return { sent: 0, pruned: 0 };
   const n = first.items.length;
-  const body = `🛒 ${tripDay(first.date, plan.today)} at ${first.store_name}: ${n} item${n === 1 ? '' : 's'}, save ${fmtCost(first.saving_cents, getMeta(db, 'currency') ?? DEFAULT_CURRENCY)}`;
+  const body = `🛒 ${tripDay(first.date, plan.today)} at ${first.store_name}: ${n} item${n === 1 ? '' : 's'}${first.saving_cents > 0 ? `, save ${fmtCost(first.saving_cents, getMeta(db, 'currency') ?? DEFAULT_CURRENCY)}` : ''}`;
   return deliverToSubs(db, subs, { title: 'Deals', body, tag: 'deals', url: '/' }, ensureVapidKeys(db), sendPush, now);
 }
 

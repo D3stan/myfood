@@ -133,17 +133,18 @@ export function planTrips(
     for (const store_id of stores) {
       const items: Trip['items'] = [];
       for (const n of needs) {
-        if (n.normalCents == null || (n.deadlineDay != null && n.deadlineDay < day)) continue;
+        if (n.deadlineDay != null && n.deadlineDay < day) continue;
         const live = offers.filter(o => o.item_id === n.item_id && o.store_id === store_id && o.valid_from <= date && date <= o.valid_to);
         if (!live.length) continue;
         const unit_cents = Math.min(...live.map(o => o.unit_cents));
-        const saving_cents = n.units * Math.max(0, n.normalCents - unit_cents);
-        if (saving_cents > 0) items.push({ item_id: n.item_id, unit_cents, saving_cents });
+        const saving_cents = n.normalCents == null ? 0 : n.units * Math.max(0, n.normalCents - unit_cents);
+        // an item due today rides along even with no known saving: it must be bought anyway
+        if (saving_cents > 0 || n.deadlineDay === 0) items.push({ item_id: n.item_id, unit_cents, saving_cents });
       }
       if (items.length) cands.push({ day, date, store_id, items, saving_cents: items.reduce((s, x) => s + x.saving_cents, 0) });
     }
   }
-  const best = (list: Trip[]): Trip | undefined => list.reduce<Trip | undefined>((b, t) => (!b || t.saving_cents > b.saving_cents ? t : b), undefined);
+  const best = (list: Trip[]): Trip | undefined => list.reduce<Trip | undefined>((b, t) => (!b || t.saving_cents > b.saving_cents || (t.saving_cents === b.saving_cents && t.items.length > b.items.length) ? t : b), undefined);
   const dueToday = needs.some(n => n.deadlineDay === 0);
   const first = (dueToday ? best(cands.filter(t => t.day === 0)) : undefined) ?? best(cands);
   if (!first) return { trips: [], total_saving_cents: 0 };

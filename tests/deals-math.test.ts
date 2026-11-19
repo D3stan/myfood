@@ -210,4 +210,14 @@ describe('planTrips', () => {
   test('unknown normal price saves nothing', () => {
     expect(planTrips({ needs: [{ item_id: 1, units: 5, deadlineDay: null, normalCents: null }], offers: [offer(1, 1, today, today, 1)], today }).trips).toEqual([]);
   });
+  test('items due today with no known price still get a trip today, at the store covering most of them', () => {
+    const r = planTrips({
+      needs: [{ item_id: 1, units: 1, deadlineDay: 0, normalCents: null }, { item_id: 2, units: 1, deadlineDay: 0, normalCents: null }],
+      offers: [offer(1, 1, today, today, 100), offer(1, 2, today, today, 100), offer(2, 2, today, today, 100)],
+      today,
+    });
+    expect(r.trips).toHaveLength(1);
+    expect(r.trips[0]).toMatchObject({ day: 0, store_id: 's2', saving_cents: 0 });
+    expect(r.trips[0]!.items.map(i => i.item_id)).toEqual([1, 2]);
+  });
 });

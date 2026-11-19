@@ -7,7 +7,7 @@ import type { V } from '../components/bits.ts';
 /** The plan's strip on the Pantry; absent when there is no trip. */
 export function dealsStrip({ st }: V) {
   const d = st.deals_summary;
-  return d ? html`<button class="note" id="deals-strip" style="display:block;width:100%;text-align:left" data-a="go" data-p="deals">🛒 <b>${tripDay(d.date, isoDate(st.now))} at ${d.store_name}</b> · ${d.deal_count} item${d.deal_count === 1 ? '' : 's'} · save ${fmtCost(d.saving_cents, st.currency)}</button>` : '';
+  return d ? html`<button class="note" id="deals-strip" style="display:block;width:100%;text-align:left" data-a="go" data-p="deals">🛒 <b>${tripDay(d.date, isoDate(st.now))} at ${d.store_name}</b> · ${d.deal_count} item${d.deal_count === 1 ? '' : 's'}${d.saving_cents > 0 ? ` · save ${fmtCost(d.saving_cents, st.currency)}` : ''}</button>` : '';
 }
 
 export function dealsPage({ st, ui }: V) {
@@ -16,9 +16,9 @@ export function dealsPage({ st, ui }: V) {
   return html`
     <div class="row" style="margin-bottom:8px"><button id="deals-sync" class="btn alt right" data-a="syncDeals" ${off}>Sync now</button></div>
     ${!p ? html`<p class="small muted">Loading…</p>` : html`
-      ${p.trips.length ? html`<p id="deals-total" class="small" style="margin:0 0 8px">Total saving <b>${money(p.total_saving_cents)}</b></p>` : html`<p class="note">No shopping trip is worth planning right now.</p>`}
+      ${p.trips.length ? (p.total_saving_cents > 0 ? html`<p id="deals-total" class="small" style="margin:0 0 8px">Total saving <b>${money(p.total_saving_cents)}</b></p>` : '') : html`<p class="note">No shopping trip is worth planning right now.</p>`}
       ${p.trips.map((t, n) => html`<div class="card" id="trip-${n}">
-        <h2 style="margin-top:0">${tripDay(t.date, p.today)} · ${t.store_emoji} ${t.store_name} <span class="small muted">save ${money(t.saving_cents)}</span></h2>
+        <h2 style="margin-top:0">${tripDay(t.date, p.today)} · ${t.store_emoji} ${t.store_name} ${t.saving_cents > 0 ? html`<span class="small muted">save ${money(t.saving_cents)}</span>` : ''}</h2>
         ${t.items.map(i => html`<div class="line"><span class="n">${i.emoji} <b>${i.name}</b> × ${i.packs}</span><span class="small muted">${money(i.unit_cents)}/unit</span></div>
           <p class="small muted" style="margin:2px 0 6px">${i.offer_title} · ${i.reason}</p>`)}
       </div>`)}
