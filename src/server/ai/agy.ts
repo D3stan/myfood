@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { AiResult } from '../../shared/types.ts';
 import type { AiInput } from '../../shared/types.ts';
+import { E } from './index.ts';
 import { buildPrompt } from './prompt.ts';
 
 // Measured on agy 1.5.9: receipt ~12 s, text ~8 s with this model and effort.
@@ -11,15 +12,6 @@ const MAX_OUT = 2_000_000;
 // cannot ask, so unlisted tools are soft-denied as well.
 const SETTINGS = JSON.stringify({ permissions: { deny: ['command(*)', 'write_file(*)', 'read_url(*)', 'execute_url(*)', 'mcp(*)'] } });
 const SCHEMA = JSON.stringify(z.toJSONSchema(AiResult));
-
-const E = {
-  slow: 'The AI took too long. Try again.',
-  login: 'The AI is not signed in on the server yet.',
-  photo: 'The AI could not read the photo.',
-  nonsense: 'The AI gave an answer I could not understand.',
-  failed: 'The AI failed. Try again.',
-  missing: 'The AI is not installed on the server.',
-};
 
 /** Best effort: agy has no documented exit code for "not signed in", so this matches its words. */
 const NOT_SIGNED_IN = /not (logged|signed) in|log ?in required|sign ?in required|please (log|sign) ?in|unauthenticated|unauthorized|authentication (failed|required)|no (valid )?credentials|oauth|invalid_grant|\b401\b/i;
@@ -80,17 +72,6 @@ export async function runAgy(prompt: string, schema: object, dir: string, denied
   return structured;
 }
 
-export async function runAi(input: AiInput): Promise<AiResult> {
-  const structured = await runAgy(buildPrompt(input), z.toJSONSchema(AiResult), input.dir, input.images.length ? E.photo : E.failed);
-  const res = AiResult.safeParse(structured);
-  // The contract says exactly one of item_id / new_item per line, and cook needs portions or total_g plus a name if new.
-  if (
-    !res.success ||
-    res.data.events.some((e) => e.lines.some((l) => (l.item_id === null) === (l.new_item === null))) ||
-    res.data.cook?.some((c) => (c.portions === null && c.total_g === null) || (c.meal_item_id === null && !c.name))
-  ) {
-    console.error(`[ai] ${E.nonsense}`);
-    throw new Error(E.nonsense);
-  }
-  return res.data;
-}
+/** Provider "agy": the model's raw JSON (unvalidated); index.ts validates. */
+export const runAiAgy = (input: AiInput): Promise<unknown> =>
+  runAgy(buildPrompt(input), z.toJSONSchema(AiResult), input.dir, input.images.length ? E.photo : E.failed);

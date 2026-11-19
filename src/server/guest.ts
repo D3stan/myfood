@@ -1,7 +1,7 @@
 // Guest view: GET /guest shows the shared pantry, read-only, to anyone holding the household guest passcode.
 //
 // WHERE TO GET THE PASSCODE (signed-in people only): Me tab -> "Guest access" card (with a New code button).
-// Or on the server: it is printed in the log at start-up (`journalctl -u myfood | grep -i "guest code"`),
+// Or on the server: it is printed once in the app log at start-up (Dokploy app logs, search "guest code"),
 // or read it with:
 //   node -e "const {DatabaseSync}=require('node:sqlite');console.log(new DatabaseSync('/var/lib/myfood/myfood.db').prepare(\"SELECT value FROM meta WHERE key='guest_code'\").get().value)"
 // Guests see shared items only (never personal ones, prices, events or names). A new code logs every guest out.

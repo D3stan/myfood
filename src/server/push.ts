@@ -37,7 +37,7 @@ interface SubscriptionRow {
   auth: string;
 }
 
-const DEFAULT_VAPID_SUBJECT = 'mailto:admin@food.0xpuddu.com';
+const DEFAULT_VAPID_SUBJECT = 'mailto:admin@myfood.0xpuddu.com';
 
 /** Reads VAPID keys from meta, auto-generating and persisting them on first boot if absent. */
 export function ensureVapidKeys(db: Db): VapidConfig {

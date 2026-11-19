@@ -1,11 +1,14 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { AiResult } from '../src/shared/types.ts';
 import type { AiContext, AiInput } from '../src/shared/types.ts';
-import { buildArgv, runAi } from '../src/server/ai/agy.ts';
+import { buildArgv } from '../src/server/ai/agy.ts';
+import { runAi } from '../src/server/ai/index.ts';
 import { buildPrompt } from '../src/server/ai/prompt.ts';
 import { fixture } from './fixture.ts';
 
@@ -19,7 +22,7 @@ const context: AiContext = {
 };
 const job = (text: string, images: string[] = [], ctx = context): AiInput => ({ text, images, dir, context: ctx });
 
-beforeEach(() => { process.env.AI_CMD = `${process.execPath} ${fake}`; delete process.env.FAKE_AGY; vi.spyOn(console, 'error').mockImplementation(() => {}); });
+beforeEach(() => { process.env.AI_CMD = `${process.execPath} ${fake}`; delete process.env.FAKE_AGY; delete process.env.AI_PROVIDER; vi.spyOn(console, 'error').mockImplementation(() => {}); });
 afterEach(() => { vi.restoreAllMocks(); delete process.env.AI_TIMEOUT_MS; });
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -96,6 +99,73 @@ describe('runAi', () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(pids.map(alive)).toEqual([false, false]);
     delete process.env.FAKE_PID_FILE;
+  });
+});
+
+describe('runAi with the openai provider', () => {
+  let srv: Server; let base = '';
+  let reply: { status: number; body: unknown; delay?: number } = { status: 200, body: {} };
+  let seen: { auth?: string; body?: any } = {};
+  const chat = (content: unknown) => ({ choices: [{ message: { content } }] });
+  const ok = JSON.stringify({ reply: 'Logged.', events: [] });
+
+  beforeAll(async () => {
+    srv = createServer((req, res) => {
+      let b = '';
+      req.on('data', (c) => { b += c; });
+      req.on('end', () => {
+        seen = { auth: req.headers.authorization, body: JSON.parse(b) };
+        setTimeout(() => { res.writeHead(reply.status, { 'content-type': 'application/json' }); res.end(JSON.stringify(reply.body)); }, reply.delay ?? 0);
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+    base = `http://127.0.0.1:${(srv.address() as { port: number }).port}`;
+  });
+  afterAll(() => { srv.close(); });
+  beforeEach(() => {
+    Object.assign(process.env, { AI_PROVIDER: 'openai', AI_BASE_URL: base, AI_MODEL: 'test-model', AI_API_KEY: 'sekret' });
+    reply = { status: 200, body: chat(ok) }; seen = {};
+  });
+  afterEach(() => { for (const k of ['AI_PROVIDER', 'AI_BASE_URL', 'AI_MODEL', 'AI_API_KEY']) delete process.env[k]; });
+
+  it('returns a validated result and sends model, key and JSON mode', async () => {
+    expect((await runAi(job('hello'))).reply).toBe('Logged.');
+    expect(seen.auth).toBe('Bearer sekret');
+    expect(seen.body).toMatchObject({ model: 'test-model', temperature: 0, response_format: { type: 'json_object' } });
+    expect(seen.body.messages[0].content).toContain('"events"'); // schema is in the system prompt
+  });
+
+  it('sends photos as base64 data URLs, with no file paths in the prompt', async () => {
+    const png = path.join(dir, 'x.png'); writeFileSync(png, 'PNGDATA');
+    await runAi(job('', [png]));
+    const parts = seen.body.messages[1].content;
+    expect(parts[0].text).toContain('1 image attached');
+    expect(parts[0].text).not.toContain('@');
+    expect(parts[1]).toEqual({ type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from('PNGDATA').toString('base64')}` } });
+  });
+
+  it.each([
+    ['garbage', 200, chat('not json'), 'The AI gave an answer I could not understand.'],
+    ['no content', 200, { choices: [] }, 'The AI gave an answer I could not understand.'],
+    ['wrong shape', 200, chat('{"hello":1}'), 'The AI gave an answer I could not understand.'],
+    ['401', 401, { error: 'bad key' }, 'The AI key on the server is missing or wrong.'],
+    ['500', 500, { error: 'boom' }, 'The AI failed. Try again.'],
+  ])('%s rejects with a readable message', async (_n, status, body, msg) => {
+    reply = { status, body };
+    await expect(runAi(job('x'))).rejects.toThrow(msg);
+  });
+
+  it('slow answer times out', async () => {
+    reply = { status: 200, body: chat(ok), delay: 1500 };
+    process.env.AI_TIMEOUT_MS = '300';
+    await expect(runAi(job('x'))).rejects.toThrow('The AI took too long. Try again.');
+  });
+
+  it('missing config is reported', async () => {
+    delete process.env.AI_MODEL;
+    await expect(runAi(job('x'))).rejects.toThrow('not installed');
+    process.env.AI_MODEL = 'm'; delete process.env.AI_API_KEY;
+    await expect(runAi(job('x'))).rejects.toThrow('key on the server');
   });
 });
 
