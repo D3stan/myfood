@@ -13,25 +13,30 @@ const BAD_KEY = 'The AI key on the server is missing or wrong.';
 
 /** Provider "openai": any OpenAI-compatible POST {AI_BASE_URL}/chat/completions. Returns the model's raw JSON (unvalidated). */
 export async function runAiOpenai(input: AiInput, env: NodeJS.ProcessEnv): Promise<unknown> {
+  const images = await Promise.all(input.images.map(async (p) => ({
+    type: 'image_url',
+    image_url: { url: `data:${MIME[path.extname(p).slice(1).toLowerCase()] ?? 'image/jpeg'};base64,${(await readFile(p)).toString('base64')}` },
+  })));
+  return chatJson(rules(), [{ type: 'text', text: data(input, { imageRefs: false }) }, ...images], SCHEMA, env);
+}
+
+/** One chat call that must answer with a JSON object for `schema`. Throws an Error with one of E's messages (or BAD_KEY). */
+export async function chatJson(rulesText: string, userContent: unknown[], schema: object, env: NodeJS.ProcessEnv): Promise<unknown> {
   const fail = (msg: string, why: string): never => { console.error(`[ai] ${msg} ${why}`); throw new Error(msg); };
   const { AI_BASE_URL: base, AI_MODEL: model, AI_API_KEY: key } = env;
   if (!base || !model) return fail(E.missing, 'AI_BASE_URL and AI_MODEL are required');
   if (!key) return fail(BAD_KEY, 'AI_API_KEY is not set');
 
   const schemaMode = env.AI_JSON_MODE === 'schema';
-  const system = schemaMode ? rules() : `${rules()}\n\nReply with one JSON object matching this JSON schema:\n${JSON.stringify(SCHEMA)}`;
-  const images = await Promise.all(input.images.map(async (p) => ({
-    type: 'image_url',
-    image_url: { url: `data:${MIME[path.extname(p).slice(1).toLowerCase()] ?? 'image/jpeg'};base64,${(await readFile(p)).toString('base64')}` },
-  })));
+  const system = schemaMode ? rulesText : `${rulesText}\n\nReply with one JSON object matching this JSON schema:\n${JSON.stringify(schema)}`;
   const body = {
     model, temperature: 0,
     messages: [
       { role: 'system', content: system },
-      { role: 'user', content: [{ type: 'text', text: data(input, { imageRefs: false }) }, ...images] },
+      { role: 'user', content: userContent },
     ],
     response_format: schemaMode
-      ? { type: 'json_schema', json_schema: { name: 'result', strict: true, schema: SCHEMA } }
+      ? { type: 'json_schema', json_schema: { name: 'result', strict: true, schema } }
       : { type: 'json_object' },
   };
 

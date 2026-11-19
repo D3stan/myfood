@@ -10,6 +10,7 @@ import type { AiContext, AiInput } from '../src/shared/types.ts';
 import { buildArgv } from '../src/server/ai/agy.ts';
 import { runAi } from '../src/server/ai/index.ts';
 import { buildPrompt } from '../src/server/ai/prompt.ts';
+import { matchOffersAi } from '../src/server/deals/matcher.ts';
 import { fixture } from './fixture.ts';
 
 const fake = path.resolve('scripts/fake-agy.mjs');
@@ -159,6 +160,19 @@ describe('runAi with the openai provider', () => {
     reply = { status: 200, body: chat(ok), delay: 1500 };
     process.env.AI_TIMEOUT_MS = '300';
     await expect(runAi(job('x'))).rejects.toThrow('The AI took too long. Try again.');
+  });
+
+  it('the deals matcher also uses the openai provider and drops unknown ids', async () => {
+    reply = { status: 200, body: chat(JSON.stringify({ matches: [
+      { offer_key: 'k1', item_id: 1, qty_per_pack: 500, confidence: 0.9 },
+      { offer_key: 'k2', item_id: 99, qty_per_pack: null, confidence: 0.9 },
+    ] })) };
+    const out = await matchOffersAi(dir)({
+      items: [{ id: 1, name: 'Pasta', category: 'dry', unit: 'g', pack_size: 500 }],
+      offers: [{ offer_key: 'k1', title: 'Spaghetti 500 g', unit: 'g', unit_qty: 500 }, { offer_key: 'k2', title: 'Soap', unit: null, unit_qty: null }],
+    });
+    expect(out.map((m) => m.offer_key)).toEqual(['k1']);
+    expect(seen.body.messages[1].content[0].text).toContain('Spaghetti 500 g');
   });
 
   it('missing config is reported', async () => {
