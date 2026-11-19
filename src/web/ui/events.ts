@@ -26,7 +26,7 @@ export function wire(): void {
   document.addEventListener('change', e => {
     store(e);
     const fEl = hit(e, '[data-f]') as HTMLInputElement | null;
-    if (fEl?.dataset.f === 'notifyLow' || fEl?.dataset.f === 'notifyExpiry') {
+    if (fEl?.dataset.f === 'notifyLow' || fEl?.dataset.f === 'notifyExpiry' || fEl?.dataset.f === 'notifyDeals') {
       void run('saveNotify', fEl);
     }
     const el = hit(e, '[data-c]');

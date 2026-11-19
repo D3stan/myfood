@@ -8,6 +8,8 @@ import { all, get, getMeta, getRev } from './db.ts';
 import type { Db } from './db.ts';
 import { fail, patchMe, patchSettings } from './domain.ts';
 import { loadHydratedItems } from './items/repo.ts';
+import { registerDealsTools } from './deals/mcp.ts';
+import type { MatchOffers } from './deals/matcher.ts';
 import { registerCookingTools } from './cooking/mcp.ts';
 import { registerEventTools } from './events/mcp.ts';
 import { registerItemTools } from './items/mcp.ts';
@@ -25,6 +27,8 @@ export interface MyFoodMcpOptions {
   forcedUserId?: number;
   lookupBarcode?: BarcodeLookupFn;
   onLowCrossings?: (prevStocks: Map<number, number>) => Promise<void>;
+  fetch?: typeof fetch;
+  matchOffers?: MatchOffers;
 }
 
 export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServer {
@@ -110,7 +114,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     {
       title: 'Run Read-Only SQL Query',
       description:
-        'Execute a read-only SQLite query (SELECT, WITH, PRAGMA, or EXPLAIN) across any table in the database (users, items, events, event_lines, presets, preset_lines, aliases, barcodes, meal_recipes, expense_locks, jobs, meta, api_tokens, push_subscriptions). Rejects writes and caps rows at 200.',
+        'Execute a read-only SQLite query (SELECT, WITH, PRAGMA, or EXPLAIN) across any table in the database (users, items, events, event_lines, presets, preset_lines, aliases, barcodes, meal_recipes, expense_locks, jobs, meta, api_tokens, push_subscriptions, stores, catalogs, offers, offer_matches). Rejects writes and caps rows at 200.',
       inputSchema: {
         sql: z.string().trim().min(1).max(10_000).describe('Single read-only SQLite statement (SELECT, WITH, PRAGMA, or EXPLAIN)'),
         params: z.array(z.union([z.string(), z.number(), z.null()])).max(50).optional().describe('Optional positional ? parameters'),
@@ -189,13 +193,14 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     }),
   );
 
-  const ctx = { db, now, defaultUserId: opts?.defaultUserId, forcedUserId: opts?.forcedUserId, build: opts?.build, lookupBarcode: opts?.lookupBarcode, onLowCrossings: opts?.onLowCrossings };
+  const ctx = { db, now, defaultUserId: opts?.defaultUserId, forcedUserId: opts?.forcedUserId, build: opts?.build, lookupBarcode: opts?.lookupBarcode, onLowCrossings: opts?.onLowCrossings, fetch: opts?.fetch, matchOffers: opts?.matchOffers };
   registerItemTools(server, ctx);
   registerEventTools(server, ctx);
   registerCookingTools(server, ctx);
   registerPresetTools(server, ctx);
   registerNutritionTools(server, ctx);
   registerSpendTools(server, ctx);
+  registerDealsTools(server, ctx);
 
   return server;
 }

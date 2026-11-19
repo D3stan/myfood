@@ -35,7 +35,7 @@ const buyEv = {
 
 export const fixture: State = {
   rev: 42, build: 'dev', now,
-  me: { id: 1, name: 'Sam', emoji: '🦊', notify_low: true, notify_expiry: true, goals: { kcal: null, protein_g: null, fat_g: null, carbs_g: null } },
+  me: { id: 1, name: 'Sam', emoji: '🦊', notify_low: true, notify_expiry: true, notify_deals: true, goals: { kcal: null, protein_g: null, fat_g: null, carbs_g: null } },
   users: [{ id: 1, name: 'Sam', emoji: '🦊' }, { id: 2, name: 'Robin', emoji: '🐻' }],
   items: [
     base(1, 'Eggs', '🥚', 'dairy', 'pc', 1, 10, 3, 7, { expires_at: inDays(10), shelf_life_days: 21, kcal_per_unit: 78, protein_per_unit: 6.3 }),
@@ -91,4 +91,5 @@ export const fixture: State = {
     { day: isoDate(now - 3_600_000 * 24), user_id: 1, kcal: 657, protein_g: 40.2, fat_g: 0, carbs_g: null, value_cents: 0, unpriced: 0, no_kcal: 0 },
   ],
   guest_code: 'abcd-2345',
+  deals_summary: null,
 };

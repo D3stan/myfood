@@ -5,6 +5,7 @@ import { fmtNum } from '../../../shared/text.ts';
 import type { FoodEvent, Item, Job, Preset } from '../../../shared/types.ts';
 import { expiryLabel, levelName, ownerOf } from '../components/bits.ts';
 import type { V } from '../components/bits.ts';
+import { dealsStrip } from '../deals/screen.ts';
 
 /** The preset whose hour is nearest to now, if within 3 hours and not logged yet today. */
 export function heroPreset(presets: Preset[], events: FoodEvent[], now = new Date()): Preset | null {
@@ -111,6 +112,7 @@ export function pantry(v: V, now: Date | number = new Date()) {
     ${eatSoon.length ? html`<div class="warn-strip" id="eat-soon"><b>Eat soon</b>
       <div class="chips">${eatSoon.map(i => html`<button class="chip" data-a="open" data-s="item" data-id="${i.id}">${i.emoji} ${i.name} · ${expiryLabel(i.expires_at, nowMs)}</button>`)}</div>
     </div>` : ''}
+    ${dealsStrip(v)}
     ${low.length ? html`<div class="note" id="low"><b>Running low</b>
       <div class="chips">${low.map(i => html`<span class="chip">${i.emoji} ${i.name}</span>`)}</div>
       <button class="btn alt" data-a="share">Share list</button></div>` : ''}

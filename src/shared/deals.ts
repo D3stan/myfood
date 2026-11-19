@@ -1,6 +1,8 @@
 // Deal maths: pure functions, no DB, no clock. Callers pass `now` / `today`. Money is in minor units.
 import { addDays, daysUntil, parseIsoDate } from './dates.ts';
 import { nextStock } from './stock.ts';
+import { DEFAULT_CURRENCY } from './currency.ts';
+import { fmtCost } from './text.ts';
 import type { Category, Kind } from './types.ts';
 
 const DAY = 86_400_000;
@@ -66,21 +68,23 @@ export interface StockUpIn {
   shelfLifeDays: number | null;
   /** Days until a cheaper offer is expected, if one is known. */
   nextCheaperInDays: number | null;
+  /** For the reason text; default DKK. */
+  currency?: string;
 }
 export interface StockUpOut { packs: number; units: number; horizonDays: number; pctOff: number; reason: string }
 
-const kr = (cents: number): string => `${Math.round(cents / 100)} kr`;
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n));
 
 /** How many packs to buy on this offer. Zero when stock already covers the horizon. */
 export function stockUp(i: StockUpIn): StockUpOut {
   const qty = i.qtyPerPack > 0 ? i.qtyPerPack : 1;
+  const money = (cents: number) => fmtCost(Math.round(cents), i.currency ?? DEFAULT_CURRENCY);
   const delta = i.normalCents && i.normalCents > 0 ? Math.max(0, (i.normalCents - i.offerUnitCents) / i.normalCents) : 0;
   const pctOff = Math.round(delta * 100);
   const none = (horizonDays: number, reason: string): StockUpOut => ({ packs: 0, units: 0, horizonDays, pctOff, reason });
   const done = (packs: number, horizonDays: number, covers: string): StockUpOut => {
     const capped = i.maxPerCustomer != null ? Math.min(packs, i.maxPerCustomer) : packs;
-    const parts = [`${capped} pack${capped === 1 ? '' : 's'}`, `${kr(i.offerUnitCents * qty)}/pack`];
+    const parts = [`${capped} pack${capped === 1 ? '' : 's'}`, `${money(i.offerUnitCents * qty)} per pack`];
     if (pctOff > 0) parts.push(`${pctOff}% under usual`);
     parts.push(covers);
     return { packs: capped, units: capped * qty, horizonDays, pctOff, reason: parts.join(' · ') };
@@ -163,4 +167,10 @@ export function planTrips(
   }
   const trips = (pair ? [pair.a, pair.b] : [first]).sort((x, y) => x.day - y.day);
   return { trips, total_saving_cents: trips.reduce((s, t) => s + t.saving_cents, 0) };
+}
+
+/** "Today", "Tomorrow", else the weekday ("Sat") of a YYYY-MM-DD date. */
+export function tripDay(date: string, today: string): string {
+  const n = daysUntil(date, parseIsoDate(today)!);
+  return n <= 0 ? 'Today' : n === 1 ? 'Tomorrow' : parseIsoDate(date)!.toLocaleDateString('en-GB', { weekday: 'short' });
 }

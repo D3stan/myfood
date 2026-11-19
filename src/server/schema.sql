@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   code_hash TEXT NOT NULL UNIQUE,   -- sha256 hex of the access code
   notify_low INTEGER NOT NULL DEFAULT 1,
   notify_expiry INTEGER NOT NULL DEFAULT 1,
+  notify_deals INTEGER NOT NULL DEFAULT 1,
   goal_kcal REAL,                   -- NULL = no goal
   goal_protein_g REAL,
   goal_fat_g REAL,

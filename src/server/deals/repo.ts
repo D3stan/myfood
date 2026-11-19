@@ -1,7 +1,8 @@
 import { isoDate } from '../../shared/dates.ts';
 import { DEFAULT_CURRENCY } from '../../shared/currency.ts';
 import type { ItemDeals, NormalPrice } from '../../shared/types.ts';
-import { all, get, getMeta, run } from '../db.ts';
+import { all, bumpRev, get, getMeta, run } from '../db.ts';
+import { fail } from '../domain.ts';
 import type { Db } from '../db.ts';
 import { PRICED_BUYS } from '../events/repo.ts';
 
@@ -20,6 +21,14 @@ export function setMatch(db: Db, offerKey: string, itemId: number | null, qty: n
   run(db, `INSERT OR ${replace ? 'REPLACE' : 'IGNORE'} INTO offer_matches(offer_key, item_id, qty_per_pack, confidence, source, updated_at)
     VALUES (?1, ?2, CASE WHEN ?2 IS NULL THEN NULL ELSE COALESCE(?3, (SELECT o.unit_qty FROM offers o JOIN items i ON i.id = ?2 AND i.unit = o.unit WHERE o.offer_key = ?1 LIMIT 1)) END, ?4, ?5, ?6)`,
   offerKey, itemId, qty, confidence, source, now);
+}
+
+/** A manual link (or ignore, with a null item) of an offer_key; replaces any earlier match. */
+export function linkOffer(db: Db, offerKey: string, itemId: number | null, qty: number | null, now: number): void {
+  if (!get(db, 'SELECT 1 FROM offers WHERE offer_key = ?', offerKey)) fail(404, 'No such offer');
+  if (itemId !== null && !get(db, 'SELECT 1 FROM items WHERE id = ?', itemId)) fail(404, 'No such item');
+  setMatch(db, offerKey, itemId, qty, 1, 'manual', now, true);
+  bumpRev(db);
 }
 
 const median = (xs: number[]): number => { const s = [...xs].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2; };

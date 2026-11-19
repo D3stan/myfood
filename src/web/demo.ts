@@ -14,6 +14,9 @@ import type {
   BarcodeLookup,
   CookBody,
   DataInfo,
+  DealsInfo,
+  DealsPlan,
+  DealStore,
   EventBody,
   EventLine,
   EventPatch,
@@ -540,6 +543,7 @@ export function createDemoState(now = Date.now()): State {
       emoji: '🦊',
       notify_low: true,
       notify_expiry: true,
+      notify_deals: true,
       goals: { kcal: 2200, protein_g: 140, fat_g: 70, carbs_g: 240 },
     },
     users,
@@ -586,6 +590,7 @@ export function createDemoState(now = Date.now()): State {
     expenses,
     daily_nutrition,
     guest_code: 'demo-2026',
+    deals_summary: null,
   };
 }
 
@@ -708,6 +713,8 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
     st.daily_nutrition = computeDailyNutrition(st.events, st.items, []);
     st.settle = computeDemoSettle(st.users, st.events, settleSince);
   };
+  const dealStores: DealStore[] = [['netto-dk', 'Netto', '🟡'], ['lidl-dk', 'Lidl', '🔵'], ['coop365-dk', 'Coop 365', '🟢']].map(([id, name, emoji]) => ({ id: id!, name: name!, emoji: emoji!, enabled: true, last_synced_at: null, last_error: null }));
+  let dealLoc = { lat: 55.6761, lng: 12.5683, radius_m: 5000 };
   const bump = () => { st.rev += 1; st.now = Date.now(); syncDerived(); return structuredClone(st); };
   const assertUnlocked = (at: number) => {
     const period = isoWeek(at);
@@ -1143,6 +1150,7 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
       if (b.emoji !== undefined) st.me.emoji = b.emoji;
       if (b.notify_low !== undefined) st.me.notify_low = b.notify_low;
       if (b.notify_expiry !== undefined) st.me.notify_expiry = b.notify_expiry;
+      if (b.notify_deals !== undefined) st.me.notify_deals = b.notify_deals;
       if (b.goals) {
         st.me.goals = {
           kcal: b.goals.kcal === undefined ? st.me.goals.kcal : b.goals.kcal,
@@ -1197,6 +1205,19 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
     }
 
     if (method === 'GET' && path.startsWith('/api/items/') && path.endsWith('/deals')) return { normal: null, offers: [] };
+
+    if (path.startsWith('/api/deals/')) {
+      if (method === 'GET' && path === '/api/deals/plan') return { generated_at: Date.now(), today: isoDate(Date.now()), trips: [], items: [], total_saving_cents: 0 } satisfies DealsPlan;
+      if (method === 'GET' && path === '/api/deals/catalogs') return { stores: dealStores, catalogs: [], lat: dealLoc.lat, lng: dealLoc.lng, radius_m: dealLoc.radius_m } satisfies DealsInfo;
+      if (method === 'POST' && path === '/api/deals/sync') return { stores: [], newOffers: 0 };
+      if (method === 'PUT' && path.startsWith('/api/deals/stores/')) {
+        const store = dealStores.find(x => x.id === path.slice('/api/deals/stores/'.length));
+        if (!store) throw new ApiError(404, 'No such store');
+        store.enabled = (body as { enabled: boolean }).enabled;
+        return bump();
+      }
+      if (method === 'PUT' && path === '/api/deals/location') { dealLoc = body as typeof dealLoc; return bump(); }
+    }
 
     if (method === 'GET' && path.startsWith('/api/items/') && path.endsWith('/prices')) {
       const id = Number(path.slice('/api/items/'.length, -'/prices'.length));

@@ -1,9 +1,14 @@
+import { createHash } from 'node:crypto';
 import { generateVAPIDKeys, sendNotification } from 'web-push';
 import { daysUntil, isoDate } from '../shared/dates.ts';
+import { DEFAULT_CURRENCY } from '../shared/currency.ts';
+import { tripDay } from '../shared/deals.ts';
 import { computeStock, shown } from '../shared/stock.ts';
+import { fmtCost } from '../shared/text.ts';
 import type { PushSubscribeBody } from '../shared/types.ts';
 import type { Db } from './db.ts';
 import { all, bumpRev, get, getMeta, run, setMeta, transaction } from './db.ts';
+import { buildPlan } from './deals/plan.ts';
 
 export interface VapidConfig {
   publicKey: string;
@@ -274,6 +279,34 @@ export async function checkExpiryPushes(
     pruned += res.pruned;
   }
   return { sent, pruned };
+}
+
+/**
+ * Notifies subscribed users (notify_deals = 1) of the first shopping trip. Deduped on a hash of all trips
+ * (date, store, item ids), so an unchanged plan is not announced twice.
+ */
+export async function checkDealsPushes(
+  db: Db,
+  sendPush: PushSender = defaultSendPush,
+  now = Date.now(),
+): Promise<{ sent: number; pruned: number }> {
+  const plan = buildPlan(db, now);
+  const first = plan.trips[0];
+  if (!first) return { sent: 0, pruned: 0 };
+  const subs = all<SubscriptionRow>(
+    db,
+    `SELECT ps.id, ps.user_id, ps.endpoint, ps.p256dh, ps.auth
+     FROM push_subscriptions ps JOIN users u ON u.id = ps.user_id
+     WHERE u.notify_deals = 1`,
+  );
+  if (!subs.length) return { sent: 0, pruned: 0 };
+  const hash = createHash('sha256')
+    .update(JSON.stringify(plan.trips.map(t => [t.date, t.store_id, t.items.map(i => i.item_id)])))
+    .digest('hex').slice(0, 12);
+  if (!claimDedupeKey(db, `deals:${hash}`, now)) return { sent: 0, pruned: 0 };
+  const n = first.items.length;
+  const body = `🛒 ${tripDay(first.date, plan.today)} at ${first.store_name}: ${n} item${n === 1 ? '' : 's'}, save ${fmtCost(first.saving_cents, getMeta(db, 'currency') ?? DEFAULT_CURRENCY)}`;
+  return deliverToSubs(db, subs, { title: 'Deals', body, tag: 'deals', url: '/' }, ensureVapidKeys(db), sendPush, now);
 }
 
 export function hasPushSubscriptions(db: Db, userId: number): boolean {

@@ -87,7 +87,7 @@ describe('stockUp', () => {
     expect(r.horizonDays).toBeCloseTo(26);
     expect(r.packs).toBe(7);
     expect(r.units).toBe(28);
-    expect(r.reason).toBe('7 packs · 80 kr/pack · 33% under usual · covers ~28 days');
+    expect(r.reason).toBe('7 packs · 80\u00a0kr. per pack · 33% under usual · covers ~28 days');
   });
   test('need <= 0 buys nothing (never "buy 1")', () => {
     const r = stockUp({ ...base, stock: 100 });

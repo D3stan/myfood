@@ -429,6 +429,8 @@ export function createApp(deps: Deps): Hono<Env> {
       now,
       build,
       lookupBarcode: deps.lookupBarcode,
+      fetch: deps.fetch,
+      matchOffers: deps.matchOffers,
       forcedUserId,
       onLowCrossings: pushLow,
     });

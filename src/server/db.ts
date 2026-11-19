@@ -187,4 +187,10 @@ export function migrate(db: Db): void {
       db.exec('PRAGMA user_version = 7');
     });
   }
+  if (version < 8) {
+    transaction(db, () => {
+      addCol(db, 'users', 'notify_deals', 'INTEGER NOT NULL DEFAULT 1');
+      db.exec('PRAGMA user_version = 8');
+    });
+  }
 }

@@ -11,6 +11,7 @@ import { TOUR_STEPS } from './components/tour.ts';
 import { afterState, commit, enterDemo, exitDemo, fail, hooks, sheet, st, sync, toast } from './helpers.ts';
 import { barcodeActions, takeBarcodePhoto } from './barcode/actions.ts';
 import { cookStateFor, cookingActions } from './cooking/actions.ts';
+import { dealsActions, loadDeals, loadStores } from './deals/actions.ts';
 import { eventActions } from './events/actions.ts';
 import { frameActions } from './frame-actions.ts';
 import { loadPrices } from './stats.ts';
@@ -39,7 +40,9 @@ function goTourStep(idx: number): void {
 }
 const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   rerender: () => {},
-  go: el => { s.ui.newToken = null; s.ui.newCode = null; s.ui.page.push(el.dataset.p!); if (el.dataset.p === 'data') void loadData(); history.pushState(null, ''); window.scrollTo(0, 0); },
+  go: el => { s.ui.newToken = null; s.ui.newCode = null; s.ui.page.push(el.dataset.p!); if (el.dataset.p === 'data') void loadData();
+    if (el.dataset.p === 'deals') void loadDeals();
+    if (el.dataset.p === 'stores') void loadStores(); history.pushState(null, ''); window.scrollTo(0, 0); },
   back: () => history.back(),
   tab: el => { if (s.ui.page.length) history.go(-s.ui.page.length); s.ui.tab = el.dataset.tab as Tab; s.ui.page = []; window.scrollTo(0, 0); },
   close: () => closeSheet(s),
@@ -140,5 +143,5 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
 
 export const actions: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
   ...core, ...itemActions, ...presetActions, ...eventActions, ...cookingActions, ...barcodeActions, ...jobActions,
-  ...settingsActions, ...nutritionActions, ...spendActions, ...frameActions,
+  ...settingsActions, ...dealsActions, ...nutritionActions, ...spendActions, ...frameActions,
 };

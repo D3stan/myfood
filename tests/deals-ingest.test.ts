@@ -83,7 +83,7 @@ describe('migration and routes', () => {
     db.exec(readFileSync(new URL('../src/server/schema.sql', import.meta.url), 'utf8'));
     db.exec('PRAGMA user_version = 6');
     migrate(db);
-    expect(get<{ user_version: number }>(db, 'PRAGMA user_version')!.user_version).toBe(7);
+    expect(get<{ user_version: number }>(db, 'PRAGMA user_version')!.user_version).toBe(8);
     expect(all<{ id: string }>(db, 'SELECT id FROM stores ORDER BY id').map(s => s.id)).toEqual(['coop365-dk', 'lidl-dk', 'netto-dk']);
     expect(JSON.parse(get<{ sources: string }>(db, "SELECT sources FROM stores WHERE id = 'lidl-dk'")!.sources)).toEqual([{ provider: 'tjek', config: { dealer_id: '71c90' } }]);
     expect([getMeta(db, 'deals_lat'), getMeta(db, 'deals_lng'), getMeta(db, 'deals_radius_m')]).toEqual(['55.6761', '12.5683', '5000']);
