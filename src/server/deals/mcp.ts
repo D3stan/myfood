@@ -1,18 +1,20 @@
+import { randomUUID } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { DealLocationBody } from '../../shared/types.ts';
+import { DealLocationBody, EventBody } from '../../shared/types.ts';
 import { isoDate } from '../../shared/dates.ts';
 import { aliasKey } from '../../shared/text.ts';
 import { all, get, getMeta, transaction } from '../db.ts';
 import { DEFAULT_CURRENCY } from '../../shared/currency.ts';
 import { fail } from '../domain.ts';
-import { IDEMPOTENT_WRITE_ANNOTATIONS, READ_ANNOTATIONS, WRITE_ANNOTATIONS, okResult, runTool } from '../mcp-kit.ts';
+import { IDEMPOTENT_WRITE_ANNOTATIONS, READ_ANNOTATIONS, WRITE_ANNOTATIONS, okResult, resolveUserId, runTool } from '../mcp-kit.ts';
 import type { McpCtx } from '../mcp-kit.ts';
+import { createEvent, hydrateEventByCid } from '../events/repo.ts';
 import { buildPlan } from './plan.ts';
 import { dealsInfo, linkOffer, setLocation, setStoreEnabled } from './repo.ts';
 import { syncStores } from './sync.ts';
 
-export function registerDealsTools(server: McpServer, { db, now, fetch: fetchFn, matchOffers }: McpCtx): void {
+export function registerDealsTools(server: McpServer, { db, now, defaultUserId, forcedUserId, onLowCrossings, fetch: fetchFn, matchOffers }: McpCtx): void {
   server.registerTool(
     'get_shopping_plan',
     {
@@ -140,6 +142,44 @@ export function registerDealsTools(server: McpServer, { db, now, fetch: fetchFn,
       });
       const { stores: current, lat, lng, radius_m } = dealsInfo(db, isoDate(now()));
       return okResult('Updated deal settings.', { stores: current, location: { lat, lng, radius_m } });
+    }),
+  );
+
+  server.registerTool(
+    'log_trip',
+    {
+      title: 'Log Shopping Trip',
+      description: 'Log that today\'s shopping trip at a store was done: one buy event with the pack quantities and the offer prices. Without items it logs the planned items of today\'s trip at that store (get_shopping_plan); with items (item_id and packs) it uses the cheapest offer live today at that store. It logs the offer price: a scanned receipt stays the precise record, and the event can be edited. Fails for items with no live offer at that store, for a locked week, or when there is nothing to log.',
+      inputSchema: {
+        user_id: z.number().int().positive().optional().describe('User ID (optional only when household has 1 user)'),
+        store_id: z.string().trim().min(1).max(40).describe('Store id from get_shopping_plan, e.g. netto-dk'),
+        items: z.array(z.object({ item_id: z.number().int().positive(), packs: z.number().int().min(1).max(100) })).min(1).max(60).optional().describe('Items and packs bought; default: the planned items of today\'s trip at this store'),
+      },
+      annotations: WRITE_ANNOTATIONS,
+    },
+    ({ user_id, store_id, items }) => runTool(async () => {
+      const nowMs = now(), today = isoDate(nowMs);
+      const uid = resolveUserId(db, user_id, defaultUserId, forcedUserId);
+      const trip = buildPlan(db, nowMs).trips.find(t => t.date === today && t.store_id === store_id);
+      const lines = (items
+        ? items.map(({ item_id, packs }) => {
+          const o = get<{ price_cents: number; qty_per_pack: number }>(db, `
+            SELECT o.price_cents, m.qty_per_pack FROM offers o JOIN offer_matches m ON m.offer_key = o.offer_key AND m.item_id = ? AND m.qty_per_pack > 0
+              JOIN stores s ON s.id = o.store_id AND s.enabled = 1
+            WHERE o.store_id = ? AND o.valid_from <= ? AND o.valid_to >= ? AND o.currency = ? ORDER BY o.price_cents * 1.0 / m.qty_per_pack LIMIT 1`,
+          item_id, store_id, today, today, getMeta(db, 'currency') ?? DEFAULT_CURRENCY);
+          if (!o) fail(400, `Item ${item_id} has no offer live today at ${store_id}`);
+          return { item_id, qty: packs * o.qty_per_pack, cost_cents: packs * o.price_cents };
+        })
+        : (trip?.items ?? []).map(i => ({ item_id: i.item_id, qty: i.packs * i.qty_per_pack, cost_cents: i.packs * i.price_cents })));
+      if (!lines.length) fail(400, `No trip today at ${store_id}; pass items to log one`);
+      const store = get<{ name: string }>(db, 'SELECT name FROM stores WHERE id = ?', store_id);
+      const cid = `mcp-${randomUUID()}`;
+      const body = EventBody.parse({ cid, at: nowMs, kind: 'buy', lines, note: store?.name ?? store_id });
+      const { prevStocks } = createEvent(db, uid, body, nowMs, { source: 'manual' });
+      await onLowCrossings?.(prevStocks);
+      const event = hydrateEventByCid(db, cid)!;
+      return okResult(`Logged the ${body.note} trip as ${cid} (${event.lines.length} line(s)).`, { event });
     }),
   );
 }

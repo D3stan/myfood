@@ -823,11 +823,33 @@ describe('deals UI', () => {
     const deals = appHtml(s, new Date(fixture.now));
     expect(deals).toContain('Eggs');
     expect(deals).toContain('data-a="syncDeals"');
+    expect(deals).toContain('data-a="boughtTrip"');
+    s.ui.dealsPlan!.trips[0]!.date = '2999-01-01';
+    expect(appHtml(s, new Date(fixture.now))).not.toContain('data-a="boughtTrip"');
     s.ui.page = ['stores'];
     s.ui.dealsInfo = { stores: [{ id: 'netto-dk', name: 'Netto', emoji: '🟡', enabled: true, last_synced_at: null, last_error: 'boom' }], catalogs: [], lat: 55.6, lng: 12.5, radius_m: 5000 };
     const stores = appHtml(s, new Date(fixture.now));
     expect(stores).toContain('data-c="toggleStore"');
     expect(stores).toContain('boom');
     expect(stores).toContain('data-f="dealRadius"');
+  });
+
+  test('Bought these queues a buy op with the right lines and drops the trip', async () => {
+    const s = singletonStore, morphSpy = vi.spyOn(Idiomorph, 'morph').mockImplementation(() => []);
+    vi.stubGlobal('window', { setTimeout: () => 0 });
+    vi.stubGlobal('document', {
+      getElementById: () => ({ classList: { toggle() {} }, setAttribute() {}, scrollTop: 0, querySelector: () => null, focus() {} }),
+      documentElement: { classList: { toggle() {} } }, activeElement: null, querySelector: () => null, title: '',
+    });
+    s.server = structuredClone(fixture); s.pending = []; s.ui.online = false;
+    s.ui.dealsPlan = {
+      generated_at: 0, today: isoDate(fixture.now), total_saving_cents: 0, items: [],
+      trips: [{ date: isoDate(fixture.now), store_id: 'netto-dk', store_name: 'Netto', store_emoji: '🟡', saving_cents: 0, items: [{ item_id: 1, name: 'Eggs', emoji: '🥚', packs: 2, unit_cents: 150, saving_cents: 0, reason: '', offer_title: 'Eggs 10 pk', qty_per_pack: 10, price_cents: 1500 }] }],
+    };
+    await actions.boughtTrip!({ dataset: { n: '0' } } as unknown as HTMLElement);
+    expect(s.pending).toHaveLength(1);
+    expect(s.pending[0]).toMatchObject({ type: 'event', body: { kind: 'buy', note: 'Netto', lines: [{ item_id: 1, qty: 20, cost_cents: 3000 }] } });
+    expect(s.ui.dealsPlan!.trips).toHaveLength(0);
+    s.pending = []; morphSpy.mockRestore(); vi.unstubAllGlobals(); s.ui.online = true;
   });
 });
