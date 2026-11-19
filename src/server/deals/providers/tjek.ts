@@ -66,7 +66,7 @@ export async function fetchTjek(
     if (!c?.id || !c.run_from || !c.run_till) continue;
     const cat = { external_id: String(c.id), title: String(c.label ?? c.id), valid_from: localDay(c.run_from), valid_to: localDay(c.run_till) };
     catalogs.push(cat);
-    for (let offset = 0; ; offset += PAGE) {
+    for (let offset = 0; offset < 50 * PAGE; offset += PAGE) { // cap: a misbehaving API must not loop forever
       const page = await getJson(fetchFn, `${BASE}/offers?catalog_ids=${encodeURIComponent(cat.external_id)}&limit=${PAGE}&offset=${offset}`);
       for (const o of page) {
         const n = normaliseOffer(o, cat.external_id, { from: cat.valid_from, to: cat.valid_to });
