@@ -854,7 +854,7 @@ test('stdio MCP transport connects against MYFOOD_DB and runs tools end-to-end',
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    expect(tools.tools.length).toBe(36);
+    expect(tools.tools.length).toBe(37);
     expect(tools.tools.map(t => t.name)).toContain('get_state');
     expect(tools.tools.map(t => t.name)).toContain('query_sql');
 

@@ -21,6 +21,7 @@ export function dealsPage({ st, ui }: V) {
         <h2 style="margin-top:0">${tripDay(t.date, p.today)} · ${t.store_emoji} ${t.store_name} ${t.saving_cents > 0 ? html`<span class="small muted">save ${money(t.saving_cents)}</span>` : ''}</h2>
         ${t.items.map(i => html`<div class="line"><span class="n">${i.emoji} <b>${i.name}</b> × ${i.packs}</span><span class="small muted">${money(i.unit_cents)}/unit</span></div>
           <p class="small muted" style="margin:2px 0 6px">${i.offer_title} · ${i.reason}</p>`)}
+        ${t.date === p.today ? html`<div class="row"><button id="trip-${n}-bought" class="btn right" data-a="boughtTrip" data-store="${t.store_id}">Bought these</button></div>` : ''}
       </div>`)}
       ${p.items.some(i => !i.on_trip) ? html`<div class="card"><h2 style="margin-top:0">Other deals</h2>
         ${p.items.filter(i => !i.on_trip).map(i => html`<div class="line"><span class="n">${i.emoji} <b>${i.name}</b> <span class="small muted">${i.store_emoji} ${i.store_name} · ${i.valid_from} to ${i.valid_to}${i.pct_off > 0 ? ` · −${i.pct_off}%` : ''}</span></span></div>

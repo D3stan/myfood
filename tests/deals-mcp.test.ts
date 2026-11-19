@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createApiToken, sha256 } from '../src/server/auth.ts';
 import { get, getMeta, openDb } from '../src/server/db.ts';
 import type { Db } from '../src/server/db.ts';
+import { isoWeek } from '../src/shared/dates.ts';
 import { matchOffersForDir } from '../src/server/deals/matcher.ts';
 import type { MatchOffers } from '../src/server/deals/matcher.ts';
 import { createApp } from '../src/server/routes.ts';
@@ -65,6 +66,61 @@ test('get_state carries deals_summary; get_shopping_plan adds stores, location a
   expect(plan.location).toEqual({ lat: Number(getMeta(db, 'deals_lat')), lng: Number(getMeta(db, 'deals_lng')), radius_m: Number(getMeta(db, 'deals_radius_m')) });
   expect(plan.unmatched_offer_count).toBe(1);
   expect(data(await call(await connect(), 'get_state')).deals_summary).not.toBeUndefined();
+});
+
+describe('log_trip', () => {
+  const events = () => db.prepare(`SELECT e.cid, e.source, e.kind, e.note, e.user_id, e.cost_cents FROM events e`).all() as any[];
+  const lines = () => db.prepare('SELECT item_id, qty, cost_cents FROM event_lines ORDER BY item_id').all() as any[];
+
+  test('defaults to the planned items: one buy with offer qty and cost, note is the store', async () => {
+    item(1, 'Milk'); offer('arla mini mælk', { price: 1500 });
+    const c = await connect();
+    const r = data(await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk' }));
+    expect(r.event).toMatchObject({ kind: 'buy', note: 'Netto', source: 'manual' });
+    expect(events()).toHaveLength(1);
+    expect(lines()).toEqual([{ item_id: 1, qty: expect.any(Number), cost_cents: expect.any(Number) }]);
+    const l = lines()[0], packs = l.cost_cents / 1500;
+    expect(Number.isInteger(packs) && packs >= 1).toBe(true);
+    expect(l.qty).toBe(packs * 1000);
+  });
+
+  test('explicit items use the cheapest live offer at the store; items without one are rejected', async () => {
+    item(1, 'Milk'); item(2, 'Bread');
+    offer('dear milk', { price: 1500 }); offer('cheap milk', { price: 1000 });
+    offer('bread', { item: 2, store: 'lidl-dk' });
+    const c = await connect();
+    expect((await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk', items: [{ item_id: 2, packs: 1 }] })).isError).toBe(true);
+    expect((await call(c, 'log_trip', { user_id: 1, store_id: 'nope', items: [{ item_id: 1, packs: 1 }] })).isError).toBe(true);
+    expect((await call(c, 'log_trip', { user_id: 1, store_id: 'coop365-dk' })).isError).toBe(true); // no trip, no items
+    expect(events()).toHaveLength(0);
+    data(await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk', items: [{ item_id: 1, packs: 3 }] }));
+    expect(lines()).toEqual([{ item_id: 1, qty: 3000, cost_cents: 3000 }]);
+  });
+
+  test('a retried call with the same cid logs once; archived items are rejected', async () => {
+    item(1, 'Milk'); offer('arla mini mælk');
+    const c = await connect();
+    data(await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk', cid: 'trip-0001' }));
+    data(await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk', cid: 'trip-0001' }));
+    expect(events()).toHaveLength(1);
+    db.exec('UPDATE items SET archived_at = 1 WHERE id = 1');
+    expect((await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk', items: [{ item_id: 1, packs: 1 }] })).isError).toBe(true);
+  });
+
+  test('a locked week is an error and logs nothing', async () => {
+    item(1, 'Milk'); offer('arla mini mælk');
+    const c = await connect();
+    data(await call(c, 'lock_expense_week', { user_id: 1, period: isoWeek(NOW) }));
+    expect((await call(c, 'log_trip', { user_id: 1, store_id: 'netto-dk' })).isError).toBe(true);
+    expect(events()).toHaveLength(0);
+  });
+
+  test('forcedUserId wins over user_id', async () => {
+    item(1, 'Milk'); offer('arla mini mælk');
+    const { token } = createApiToken(db, 1, 'Claude', NOW, 'mcp');
+    data(await call(await connect({ Authorization: `Bearer ${token}` }), 'log_trip', { store_id: 'netto-dk', user_id: 2 }));
+    expect(events()[0].user_id).toBe(1);
+  });
 });
 
 test('set_settings notify_deals: forcedUserId wins over user_id', async () => {
