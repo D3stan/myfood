@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { openDb } from './db.ts';
+import { matchOffersForDir } from './deals/matcher.ts';
 import { createMyFoodMcpServer } from './mcp.ts';
 
 function resolveDbPath(): string {
@@ -27,7 +28,7 @@ if (dbFile !== ':memory:') {
 const defaultUserRaw = process.env.MYFOOD_USER_ID?.trim();
 const defaultUserId = defaultUserRaw && /^\d+$/.test(defaultUserRaw) ? Number(defaultUserRaw) : undefined;
 
-const server = createMyFoodMcpServer(db, { defaultUserId });
+const server = createMyFoodMcpServer(db, { defaultUserId, matchOffers: matchOffersForDir(resolve(process.env.DATA_DIR ?? './data'), process.env.JOBS_DIR).matchOffers });
 const transport = new StdioServerTransport();
 
 let closing = false;

@@ -9,6 +9,7 @@ import type { Db } from './db.ts';
 import { fail, patchMe, patchSettings } from './domain.ts';
 import { loadHydratedItems } from './items/repo.ts';
 import { registerDealsTools } from './deals/mcp.ts';
+import { dealsSummary } from './deals/plan.ts';
 import type { MatchOffers } from './deals/matcher.ts';
 import { registerCookingTools } from './cooking/mcp.ts';
 import { registerEventTools } from './events/mcp.ts';
@@ -71,6 +72,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
           expense_locks: all(db, 'SELECT period, locked_by, locked_at, total_cents, event_count, note FROM expense_locks ORDER BY period DESC'),
           expenses: [],
           daily_nutrition: [],
+          deals_summary: dealsSummary(db, nowMs),
         };
         return okResult(`Household has no users yet (rev ${rev}).`, empty);
       }
@@ -96,6 +98,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
         expense_locks: st.expense_locks,
         expenses: compact ? st.expenses.slice(0, 25) : st.expenses,
         daily_nutrition: compact ? st.daily_nutrition.slice(0, 14) : st.daily_nutrition,
+        deals_summary: st.deals_summary,
       };
       if (!compact) {
         data.usual = st.usual;
@@ -135,26 +138,27 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
     'set_settings',
     {
       title: 'Update Household or User Settings',
-      description: 'Update household currency (ISO 4217 code: ' + CURRENCIES.join(', ') + '), country, and/or a user notification preferences (notify_low, notify_expiry) and daily nutrition goals (goals: kcal, protein_g, fat_g, carbs_g; null clears one).',
+      description: 'Update household currency (ISO 4217 code: ' + CURRENCIES.join(', ') + '), country, and/or a user notification preferences (notify_low, notify_expiry, notify_deals) and daily nutrition goals (goals: kcal, protein_g, fat_g, carbs_g; null clears one).',
       inputSchema: {
         currency: SettingsBody.shape.currency.describe('Household currency, ISO 4217 code'),
         country: SettingsBody.shape.country.describe('ISO 2-letter country code for barcode lookups (e.g. dk, it, us; empty clears)'),
-        user_id: z.number().int().positive().optional().describe('User ID when updating notify_low or notify_expiry'),
+        user_id: z.number().int().positive().optional().describe('User ID when updating notify_low, notify_expiry or notify_deals'),
         notify_low: MeBody.shape.notify_low.describe('Enable/disable low-stock notifications'),
         notify_expiry: MeBody.shape.notify_expiry.describe('Enable/disable expiry notifications'),
+        notify_deals: MeBody.shape.notify_deals.describe('Enable/disable shopping-deal notifications'),
         goals: MeBody.shape.goals.describe('Daily nutrition goals; omitted keys unchanged, null clears'),
       },
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
     },
     (args) => runTool(() => {
-      const hasUserUpdate = args.notify_low !== undefined || args.notify_expiry !== undefined || args.goals !== undefined;
+      const hasUserUpdate = args.notify_low !== undefined || args.notify_expiry !== undefined || args.notify_deals !== undefined || args.goals !== undefined;
       if (args.currency === undefined && args.country === undefined && !hasUserUpdate) {
-        fail(400, 'Provide currency, country, notify_low, notify_expiry, and/or goals');
+        fail(400, 'Provide currency, country, notify_low, notify_expiry, notify_deals, and/or goals');
       }
       if (args.currency !== undefined || args.country !== undefined) {
         patchSettings(db, SettingsBody.parse(stripUndefined({ currency: args.currency, country: args.country })));
       }
-      let updatedUser: { id: number; name: string; emoji: string; notify_low: boolean; notify_expiry: boolean; goals: Record<'kcal' | 'protein_g' | 'fat_g' | 'carbs_g', number | null> } | null = null;
+      let updatedUser: { id: number; name: string; emoji: string; notify_low: boolean; notify_expiry: boolean; notify_deals: boolean; goals: Record<'kcal' | 'protein_g' | 'fat_g' | 'carbs_g', number | null> } | null = null;
       if (hasUserUpdate) {
         const uid = resolveUserId(db, args.user_id, opts?.defaultUserId, opts?.forcedUserId);
         patchMe(
@@ -164,13 +168,14 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
             stripUndefined({
               notify_low: args.notify_low,
               notify_expiry: args.notify_expiry,
+              notify_deals: args.notify_deals,
               goals: args.goals,
             }),
           ),
         );
-        const row = get<{ id: number; name: string; emoji: string; notify_low: number; notify_expiry: number; goal_kcal: number | null; goal_protein_g: number | null; goal_fat_g: number | null; goal_carbs_g: number | null }>(
+        const row = get<{ id: number; name: string; emoji: string; notify_low: number; notify_expiry: number; notify_deals: number; goal_kcal: number | null; goal_protein_g: number | null; goal_fat_g: number | null; goal_carbs_g: number | null }>(
           db,
-          'SELECT id, name, emoji, notify_low, notify_expiry, goal_kcal, goal_protein_g, goal_fat_g, goal_carbs_g FROM users WHERE id = ?',
+          'SELECT id, name, emoji, notify_low, notify_expiry, notify_deals, goal_kcal, goal_protein_g, goal_fat_g, goal_carbs_g FROM users WHERE id = ?',
           uid,
         )!;
         updatedUser = {
@@ -179,6 +184,7 @@ export function createMyFoodMcpServer(db: Db, opts?: MyFoodMcpOptions): McpServe
           emoji: row.emoji,
           notify_low: !!row.notify_low,
           notify_expiry: !!row.notify_expiry,
+          notify_deals: !!row.notify_deals,
           goals: { kcal: row.goal_kcal, protein_g: row.goal_protein_g, fat_g: row.goal_fat_g, carbs_g: row.goal_carbs_g },
         };
       }

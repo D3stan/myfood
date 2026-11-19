@@ -1,7 +1,7 @@
 import { isoDate } from '../../shared/dates.ts';
 import { DEFAULT_CURRENCY } from '../../shared/currency.ts';
-import type { ItemDeals, NormalPrice } from '../../shared/types.ts';
-import { all, bumpRev, get, getMeta, run } from '../db.ts';
+import type { DealsInfo, ItemDeals, NormalPrice } from '../../shared/types.ts';
+import { all, bumpRev, get, getMeta, run, setMeta, transaction } from '../db.ts';
 import { fail } from '../domain.ts';
 import type { Db } from '../db.ts';
 import { PRICED_BUYS } from '../events/repo.ts';
@@ -15,6 +15,24 @@ export const listStores = (db: Db): StoreRow[] => all<StoreRow>(db, 'SELECT * FR
 export const listCatalogs = (db: Db, today: string): CatalogRow[] => all<CatalogRow>(db, `
   SELECT c.id, c.store_id, c.title, c.valid_from, c.valid_to, (SELECT COUNT(*) FROM offers o WHERE o.catalog_id = c.id) AS offer_count
   FROM catalogs c WHERE c.valid_to >= ? ORDER BY c.valid_from, c.store_id`, today);
+
+/** Stores, upcoming catalogs and location: the body of GET /api/deals/catalogs and the extra context of `get_shopping_plan`. */
+export const dealsInfo = (db: Db, today: string): DealsInfo => ({
+  stores: listStores(db).map(({ id, name, emoji, enabled, last_synced_at, last_error }) => ({ id, name, emoji, enabled: !!enabled, last_synced_at, last_error })),
+  catalogs: listCatalogs(db, today),
+  lat: Number(getMeta(db, 'deals_lat')), lng: Number(getMeta(db, 'deals_lng')), radius_m: Number(getMeta(db, 'deals_radius_m')),
+});
+
+/** Household-wide: turns a store's offers on or off for everyone. */
+export function setStoreEnabled(db: Db, storeId: string, enabled: boolean): void {
+  if (!get(db, 'SELECT 1 FROM stores WHERE id = ?', storeId)) fail(404, 'No such store');
+  run(db, 'UPDATE stores SET enabled = ? WHERE id = ?', enabled ? 1 : 0, storeId);
+  bumpRev(db);
+}
+
+export function setLocation(db: Db, loc: { lat: number; lng: number; radius_m: number }): void {
+  transaction(db, () => { setMeta(db, 'deals_lat', String(loc.lat)); setMeta(db, 'deals_lng', String(loc.lng)); setMeta(db, 'deals_radius_m', String(loc.radius_m)); bumpRev(db); });
+}
 
 /** Stores a match. A null `qty` falls back to the offer's own pack size when its unit is the item's. `replace` overwrites an earlier match (manual edits). */
 export function setMatch(db: Db, offerKey: string, itemId: number | null, qty: number | null, confidence: number, source: string, now: number, replace = false): void {
