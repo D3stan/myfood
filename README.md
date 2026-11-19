@@ -122,6 +122,8 @@ bearer_token_env_var = "MYFOOD_MCP_SECRET"
 
 For local stdio clients (e.g. Claude Desktop, Claude Code, or Cursor running against a local checkout):
 
+Stdio runs no scheduled deals sync: call the `sync_catalogs` tool to fetch offers. It matches new offers with the AI (jobs folder `JOBS_DIR`, else `DATA_DIR/jobs`) unless `match` is false.
+
 ```json
 {
   "mcpServers": {

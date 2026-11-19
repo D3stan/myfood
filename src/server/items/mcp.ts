@@ -9,7 +9,9 @@ import { DESTRUCTIVE_ANNOTATIONS, IDEMPOTENT_WRITE_ANNOTATIONS, READ_ANNOTATIONS
 import type { McpCtx } from '../mcp-kit.ts';
 import { archiveItem, createItem, deleteAlias, getHydratedItemById, loadHydratedItems, patchItem } from './repo.ts';
 import type { HydratedItem } from './repo.ts';
-import { eventRowToJson } from '../events/repo.ts';
+import { eventRowToJson, itemPrices } from '../events/repo.ts';
+import { itemDeals } from '../deals/repo.ts';
+import { isoDate } from '../../shared/dates.ts';
 import type { EventRowFull } from '../events/repo.ts';
 
 export function registerItemTools(server: McpServer, { db, now, lookupBarcode }: McpCtx): void {
@@ -55,7 +57,7 @@ export function registerItemTools(server: McpServer, { db, now, lookupBarcode }:
     'get_item',
     {
       title: 'Get Item Details',
-      description: 'Get one item by ID or name, including stock, recipe, barcodes, receipt aliases, and recent events. For level items, an eat event line with is_set=true records the remaining level of the open container; buy adds containers and adjust sets the exact total container count.',
+      description: 'Get one item by ID or name, including stock, recipe, barcodes, receipt aliases, recent events, normal_price (per 1 unit, minor currency units), live and upcoming matched deals and the last 10 priced buys. For level items, an eat event line with is_set=true records the remaining level of the open container; buy adds containers and adjust sets the exact total container count.',
       inputSchema: {
         item_id: z.number().int().positive().optional().describe('Item ID'),
         name: z.string().trim().min(1).max(60).optional().describe('Item name (when item_id is omitted)'),
@@ -100,12 +102,16 @@ export function registerItemTools(server: McpServer, { db, now, lookupBarcode }:
         item.id,
       );
       const recent_events = eventRows.map(ev => eventRowToJson(db, ev));
+      const deals = itemDeals(db, item.id, isoDate(nowMs));
 
       return okResult(`${item.emoji} ${item.name} (#${item.id}): stock ${item.stock} ${item.unit}.`, {
         item,
         barcodes,
         aliases,
         recent_events,
+        normal_price: deals.normal,
+        deals: deals.offers,
+        prices: itemPrices(db, item.id, 10),
       });
     }),
   );

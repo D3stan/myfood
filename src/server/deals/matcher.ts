@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { isoDate } from '../../shared/dates.ts';
 import { runAgy } from '../ai/agy.ts';
@@ -43,6 +45,13 @@ export const matchOffersAi = (dir: string): MatchOffers => async ({ items, offer
   const out = Out.parse(await runAgy(prompt, z.toJSONSchema(Out), dir));
   return out.matches.filter(m => keys.has(m.offer_key) && (m.item_id === null || ids.has(m.item_id)));
 };
+
+/** Matcher for setups without main.ts (stdio): `jobsDir` is JOBS_DIR or DATA_DIR/jobs, created (as main.ts does) on first use so merely starting the server leaves no folder behind. */
+export function matchOffersForDir(dataDir: string, jobsDirEnv?: string): { jobsDir: string; matchOffers: MatchOffers } {
+  const jobsDir = resolve(jobsDirEnv ?? join(dataDir, 'jobs'));
+  const ai = matchOffersAi(jobsDir);
+  return { jobsDir, matchOffers: input => { mkdirSync(jobsDir, { recursive: true, mode: 0o750 }); return ai(input); } };
+}
 
 /** Matches offer_keys that have no `offer_matches` row yet. Failures leave them unmatched for the next sync; returns how many were stored. */
 export async function matchNewOffers(db: Db, matchOffers: MatchOffers | undefined, now: number): Promise<number> {
