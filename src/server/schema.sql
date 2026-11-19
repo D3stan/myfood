@@ -186,6 +186,57 @@ CREATE TABLE IF NOT EXISTS meal_recipes (
   PRIMARY KEY (meal_item_id, ingredient_item_id)
 );
 
+CREATE TABLE IF NOT EXISTS stores (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  emoji TEXT NOT NULL DEFAULT '🏪',
+  sources TEXT NOT NULL DEFAULT '[]',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_synced_at INTEGER,
+  last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS catalogs (
+  id INTEGER PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  source TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  valid_from TEXT NOT NULL,
+  valid_to TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  UNIQUE (store_id, source, external_id)
+);
+CREATE TABLE IF NOT EXISTS offers (
+  id INTEGER PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  catalog_id INTEGER REFERENCES catalogs(id),
+  source TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  offer_key TEXT NOT NULL,
+  price_cents INTEGER NOT NULL,
+  pre_price_cents INTEGER,
+  currency TEXT NOT NULL,
+  unit TEXT,
+  unit_qty REAL,
+  max_per_customer INTEGER,
+  ean TEXT,
+  valid_from TEXT NOT NULL,
+  valid_to TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  UNIQUE (store_id, source, external_id)
+);
+CREATE INDEX IF NOT EXISTS offers_key ON offers(offer_key);
+CREATE INDEX IF NOT EXISTS offers_dates ON offers(valid_to, valid_from);
+CREATE TABLE IF NOT EXISTS offer_matches (
+  offer_key TEXT PRIMARY KEY,
+  item_id INTEGER,
+  qty_per_pack REAL,
+  confidence REAL NOT NULL DEFAULT 1,
+  source TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT OR IGNORE INTO meta(key, value) VALUES ('rev', '0');
 INSERT OR IGNORE INTO meta(key, value) VALUES ('currency', 'DKK');

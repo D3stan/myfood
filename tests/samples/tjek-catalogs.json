@@ -1,0 +1,76 @@
+[
+ {
+  "id": "Bswgx2rE",
+  "ern": "ern:catalog:Bswgx2rE",
+  "label": "Netto uge 48",
+  "background": "#FFFFFF",
+  "run_from": "2026-11-20T23:00:00+0000",
+  "run_till": "2026-11-27T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-18T06:00:00+0000",
+  "page_count": 41,
+  "offer_count": 224,
+  "dealer_id": "9ba51",
+  "dealer_url": "https://netto.dk/",
+  "store_id": null,
+  "store_url": null,
+  "dimensions": {
+   "height": 1.4864886,
+   "width": 1
+  },
+  "pages": {
+   "thumb": [],
+   "view": [],
+   "zoom": []
+  },
+  "category_ids": [
+   "groceries_discount"
+  ],
+  "pdf_url": "https://squid-api.tjek.com/v2/catalogs/Bswgx2rE/download",
+  "all_stores": true,
+  "incito_publication_id": null,
+  "types": [
+   "paged"
+  ],
+  "tags": [
+   "trade"
+  ]
+ },
+ {
+  "id": "40K-WXWp",
+  "ern": "ern:catalog:40K-WXWp",
+  "label": "Netto uge 47",
+  "background": "#FFFFFF",
+  "run_from": "2026-11-13T23:00:00+0000",
+  "run_till": "2026-11-20T22:59:59+0000",
+  "display_run_till": true,
+  "publish": "2026-11-11T06:00:00+0000",
+  "page_count": 39,
+  "offer_count": 223,
+  "dealer_id": "9ba51",
+  "dealer_url": "https://netto.dk/",
+  "store_id": null,
+  "store_url": null,
+  "dimensions": {
+   "height": 1.410257,
+   "width": 1
+  },
+  "pages": {
+   "thumb": [],
+   "view": [],
+   "zoom": []
+  },
+  "category_ids": [
+   "groceries_discount"
+  ],
+  "pdf_url": "https://squid-api.tjek.com/v2/catalogs/40K-WXWp/download",
+  "all_stores": true,
+  "incito_publication_id": null,
+  "types": [
+   "paged"
+  ],
+  "tags": [
+   "trade"
+  ]
+ }
+]

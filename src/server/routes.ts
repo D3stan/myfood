@@ -37,6 +37,7 @@ import type { JobFile, RunAi } from './jobs.ts';
 import { ensureVapidKeys, notifyLowCrossings, sendTestPush, subscribePush, unsubscribePush } from './push.ts';
 import type { PushSender } from './push.ts';
 import { createMyFoodMcpServer } from './mcp.ts';
+import { registerDealsRoutes } from './deals/routes.ts';
 import { registerCookingRoutes } from './cooking/routes.ts';
 import { registerEventRoutes } from './events/routes.ts';
 import { registerItemRoutes } from './items/routes.ts';
@@ -58,6 +59,8 @@ export interface Deps {
   insecureCookies?: boolean;
   sendPush?: PushSender;
   lookupBarcode?: BarcodeLookupFn;
+  /** Outbound HTTP for catalog sync (tests inject a fake). Default: global fetch. */
+  fetch?: typeof fetch;
   /** Secret protecting the /mcp Streamable HTTP endpoint (disabled with 503 when unset). */
   mcpSecret?: string;
 }
@@ -224,13 +227,14 @@ export function createApp(deps: Deps): Hono<Env> {
     return c.json(state(c.get('uid')));
   });
 
-  const routeDeps: RouteDeps = { db, now, state, json, parse, id, pushLow, lookupBarcode: deps.lookupBarcode };
+  const routeDeps: RouteDeps = { db, now, state, json, parse, id, pushLow, lookupBarcode: deps.lookupBarcode, fetch: deps.fetch };
   registerEventRoutes(app, routeDeps);
   registerItemRoutes(app, routeDeps);
   registerCookingRoutes(app, routeDeps);
   registerSpendRoutes(app, routeDeps);
   registerNutritionRoutes(app, routeDeps);
   registerPresetRoutes(app, routeDeps);
+  registerDealsRoutes(app, routeDeps);
 
   // ---- api tokens & shortcut ----
   app.post('/api/tokens', async c => {
