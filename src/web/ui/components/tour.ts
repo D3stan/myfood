@@ -29,6 +29,13 @@ export const TOUR_STEPS: readonly TourStep[] = [
   },
   {
     tab: 'pantry',
+    selectors: ['#deals-strip'],
+    fallbackSelectors: ['.items'],
+    title: 'Plan the shopping trip',
+    body: 'When your usual items go on offer nearby, the strip shows where to shop today and what you save. Tap it for the list.',
+  },
+  {
+    tab: 'pantry',
     selectors: ['.composer'],
     fallbackSelectors: ['#composer'],
     title: 'Type or snap a receipt',

@@ -17,6 +17,7 @@ import type {
   DealsInfo,
   DealsPlan,
   DealStore,
+  DealsSummary,
   EventBody,
   EventLine,
   EventPatch,
@@ -24,10 +25,13 @@ import type {
   FoodEvent,
   Item,
   ItemBody,
+  ItemDeals,
   ItemPatch,
   ItemPrice,
   Job,
   JobMode,
+  PlanItem,
+  PlanTrip,
   LockPeriodBody,
   MeBody,
   NutritionStats,
@@ -88,6 +92,43 @@ const ID = {
   salt: 10,
   oatMilk: 11,
 } as const;
+
+/** The demo's deals: a Netto trip today (eggs, bacon, toast) and an oat milk offer at Lidl later this week. */
+function demoDeals(now: number) {
+  const today = isoDate(new Date(now));
+  const mk = (item_id: number, name: string, emoji: string, qty_per_pack: number, price_cents: number, normal: number, offer_title: string, reason: string) => {
+    const unit_cents = price_cents / qty_per_pack;
+    return { item_id, name, emoji, packs: 1, unit_cents, saving_cents: Math.round((normal - unit_cents) * qty_per_pack), reason, offer_title, qty_per_pack, price_cents, normal, pct_off: Math.round((1 - unit_cents / normal) * 100) };
+  };
+  const netto = { store_id: 'netto-dk', store_name: 'Netto', store_emoji: '🟡' };
+  const lidl = { store_id: 'lidl-dk', store_name: 'Lidl', store_emoji: '🔵' };
+  const tripItems = [
+    mk(ID.eggs, 'Eggs', '🥚', 10, 2500, 290, 'Eggs 10 pack', 'Running low, and this is cheaper than usual'),
+    mk(ID.bacon, 'Bacon', '🥓', 8, 1200, 200, 'Bacon, 8 slices', 'Down to the last pack, 25% off'),
+    mk(ID.bread, 'Toast bread', '🍞', 14, 1400, 140, 'Toast bread 14 slices', 'You get through a loaf a week'),
+  ];
+  const oat = { ...mk(ID.oatMilk, 'Oat milk', '🥛', 1000, 1600, 2.2, 'Oat drink 1 L', 'Stocked up for now, so it can wait for the offer'), ...lidl, valid_from: addDays(today, 2), valid_to: addDays(today, 8) };
+  const trip: PlanTrip = {
+    date: today, ...netto, saving_cents: tripItems.reduce((n, i) => n + i.saving_cents, 0),
+    items: tripItems.map(({ normal: _n, pct_off: _p, ...i }) => i),
+  };
+  const items: PlanItem[] = [
+    ...tripItems.map(i => ({ ...i, normal_cents: i.normal, rate: null, ...netto, on_trip: true, valid_from: today, valid_to: addDays(today, 5) })),
+    { ...oat, normal_cents: 2.2, rate: null, on_trip: false },
+  ];
+  const plan: DealsPlan = { generated_at: now, today, trips: [trip], items, total_saving_cents: trip.saving_cents };
+  const summary: DealsSummary = { date: today, store_name: 'Netto', store_emoji: '🟡', saving_cents: trip.saving_cents, deal_count: trip.items.length };
+  const catalogs = [
+    { id: 1, store_id: 'netto-dk', title: 'Netto weekly offers', valid_from: today, valid_to: addDays(today, 5), offer_count: 3 },
+    { id: 2, store_id: 'lidl-dk', title: 'Lidl weekly offers', valid_from: addDays(today, 2), valid_to: addDays(today, 8), offer_count: 1 },
+  ];
+  const forItem = (id: number): ItemDeals => {
+    const i = [...tripItems.map(t => ({ ...t, ...netto, valid_from: today, valid_to: addDays(today, 5) })), oat].find(x => x.item_id === id);
+    if (!i) return { normal: null, offers: [] };
+    return { normal: { cents_per_unit: i.normal, basis: 'buys' }, offers: [{ id: i.item_id, store_id: i.store_id, store_name: i.store_name, store_emoji: i.store_emoji, title: i.offer_title, price_cents: i.price_cents, unit_cents: i.unit_cents, valid_from: i.valid_from, valid_to: i.valid_to, pct_off: i.pct_off }] };
+  };
+  return { plan, summary, catalogs, forItem };
+}
 
 function sortItems(items: Item[]): Item[] {
   return [...items].sort(
@@ -590,7 +631,7 @@ export function createDemoState(now = Date.now()): State {
     expenses,
     daily_nutrition,
     guest_code: 'demo-2026',
-    deals_summary: null,
+    deals_summary: demoDeals(now).summary,
   };
 }
 
@@ -713,7 +754,7 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
     st.daily_nutrition = computeDailyNutrition(st.events, st.items, []);
     st.settle = computeDemoSettle(st.users, st.events, settleSince);
   };
-  const dealStores: DealStore[] = [['netto-dk', 'Netto', '🟡'], ['lidl-dk', 'Lidl', '🔵'], ['coop365-dk', 'Coop 365', '🟢']].map(([id, name, emoji]) => ({ id: id!, name: name!, emoji: emoji!, enabled: true, last_synced_at: null, last_error: null }));
+  const dealStores: DealStore[] = [['netto-dk', 'Netto', '🟡'], ['lidl-dk', 'Lidl', '🔵']].map(([id, name, emoji]) => ({ id: id!, name: name!, emoji: emoji!, enabled: true, last_synced_at: st.now - 3 * 3_600_000, last_error: null }));
   let dealLoc = { lat: 55.6761, lng: 12.5683, radius_m: 5000 };
   const bump = () => { st.rev += 1; st.now = Date.now(); syncDerived(); return structuredClone(st); };
   const assertUnlocked = (at: number) => {
@@ -1204,12 +1245,17 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
       return bump();
     }
 
-    if (method === 'GET' && path.startsWith('/api/items/') && path.endsWith('/deals')) return { normal: null, offers: [] };
+    if (method === 'GET' && path.startsWith('/api/items/') && path.endsWith('/deals')) return demoDeals(st.now).forItem(Number(path.slice('/api/items/'.length, -'/deals'.length)));
 
     if (path.startsWith('/api/deals/')) {
-      if (method === 'GET' && path === '/api/deals/plan') return { generated_at: Date.now(), today: isoDate(Date.now()), trips: [], items: [], total_saving_cents: 0 } satisfies DealsPlan;
-      if (method === 'GET' && path === '/api/deals/catalogs') return { stores: dealStores, catalogs: [], lat: dealLoc.lat, lng: dealLoc.lng, radius_m: dealLoc.radius_m } satisfies DealsInfo;
-      if (method === 'POST' && path === '/api/deals/sync') return { stores: [], newOffers: 0 };
+      if (method === 'GET' && path === '/api/deals/plan') {
+        const d = demoDeals(st.now).plan;
+        // A trip already logged today (the "Bought these" buy) drops off the plan.
+        const trips = d.trips.filter(t => !st.events.some(e => e.kind === 'buy' && e.note === t.store_name && isoDate(new Date(e.at)) === d.today));
+        return { ...d, trips, items: d.items.filter(i => !i.on_trip || trips.some(t => t.store_id === i.store_id)), total_saving_cents: trips.reduce((n, t) => n + t.saving_cents, 0) } satisfies DealsPlan;
+      }
+      if (method === 'GET' && path === '/api/deals/catalogs') return { stores: dealStores, catalogs: demoDeals(st.now).catalogs, lat: dealLoc.lat, lng: dealLoc.lng, radius_m: dealLoc.radius_m } satisfies DealsInfo;
+      if (method === 'POST' && path === '/api/deals/sync') return { stores: dealStores.map(x => ({ id: x.id, offers: 0 })), newOffers: 0 };
       if (method === 'PUT' && path.startsWith('/api/deals/stores/')) {
         const store = dealStores.find(x => x.id === path.slice('/api/deals/stores/'.length));
         if (!store) throw new ApiError(404, 'No such store');
