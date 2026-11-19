@@ -2,7 +2,7 @@
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { runAi } from '../src/server/ai/agy.ts';
+import { runAi } from '../src/server/ai/index.ts';
 import type { AiInput } from '../src/shared/types.ts';
 import { fixture } from '../tests/fixture.ts';
 

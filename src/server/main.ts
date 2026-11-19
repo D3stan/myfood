@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { serve } from '@hono/node-server';
-import { runAi } from './ai/agy.ts';
+import { runAi } from './ai/index.ts';
 import { matchOffersAi } from './deals/matcher.ts';
 import { checkDealsSync } from './deals/sync.ts';
 import { openDb } from './db.ts';

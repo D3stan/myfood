@@ -15,6 +15,19 @@ To test the remote `/mcp` endpoint locally, generate a secret and set `MCP_SECRE
 openssl rand -hex 32
 ```
 
+### AI
+
+`AI_PROVIDER` picks the model backend (default `agy`).
+
+| Variable | Provider | Meaning |
+|---|---|---|
+| `AI_PROVIDER` | both | `agy` (local CLI) or `openai` (OpenAI-compatible HTTP API) |
+| `AI_TIMEOUT_MS` | both | per-call timeout, default 180000 |
+| `AI_MODEL` | both | model name; required for `openai`, `agy` defaults to `gemini-3.8-flash-low` |
+| `AI_BASE_URL`, `AI_API_KEY` | openai | API root (e.g. `https://api.openai.com/v1`) and bearer key |
+| `AI_JSON_MODE` | openai | `object` (default, `json_object`) or `schema` (strict `json_schema`; some models reject our schema) |
+| `AI_CMD`, `AI_EFFORT` | agy | command to run (default `agy`) and effort (default `low`) |
+
 ## Deploy
 
 Production runs on VM 101 (`myfood@192.168.2.32`), behind a Cloudflare Tunnel.
@@ -62,7 +75,7 @@ sudo systemctl restart myfood.service
 or with the secret as the last path segment, for clients that can't send headers:
 
 ```
-https://food.0xpuddu.com/mcp/<MCP_SECRET>
+https://myfood.0xpuddu.com/mcp/<MCP_SECRET>
 ```
 
 #### claude.ai (web, Desktop, mobile)
@@ -70,7 +83,7 @@ https://food.0xpuddu.com/mcp/<MCP_SECRET>
 claude.ai custom connectors can't send an `Authorization` header, so use the path-token URL:
 
 1. claude.ai → **Settings → Connectors → Add custom connector**.
-2. Name: `MyFood`. URL: `https://food.0xpuddu.com/mcp/<MCP_SECRET>`. Leave OAuth fields empty → **Add**.
+2. Name: `MyFood`. URL: `https://myfood.0xpuddu.com/mcp/<MCP_SECRET>`. Leave OAuth fields empty → **Add**.
 3. In a chat, open the **+ / tools** menu and enable MyFood.
 
 The connector syncs to Claude Desktop and the mobile apps on the same account. Anyone with the URL has full access: treat it like a password, and rotate `MCP_SECRET` (then re-add the connector) if it leaks.
@@ -84,7 +97,7 @@ In `~/.claude.json` or `.mcp.json`:
   "mcpServers": {
     "myfood": {
       "type": "http",
-      "url": "https://food.0xpuddu.com/mcp",
+      "url": "https://myfood.0xpuddu.com/mcp",
       "headers": {
         "Authorization": "Bearer <MCP_SECRET>"
       }
@@ -101,7 +114,7 @@ In Cursor (`.cursor/mcp.json`):
 {
   "mcpServers": {
     "myfood": {
-      "url": "https://food.0xpuddu.com/mcp",
+      "url": "https://myfood.0xpuddu.com/mcp",
       "headers": {
         "Authorization": "Bearer <MCP_SECRET>"
       }
@@ -114,7 +127,7 @@ In Codex (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.myfood]
-url = "https://food.0xpuddu.com/mcp"
+url = "https://myfood.0xpuddu.com/mcp"
 bearer_token_env_var = "MYFOOD_MCP_SECRET"
 ```
 
@@ -143,11 +156,7 @@ Stdio runs no scheduled deals sync: call the `sync_catalogs` tool to fetch offer
 
 `/guest` shows the shared pantry (read-only, personal items hidden) to anyone with the guest passcode.
 
-Get the passcode: **Me tab, Guest access** (Copy / New code). On the server it is also printed at start-up, or read it with:
-
-```sh
-journalctl -u myfood | grep -i "guest code" | tail -1
-```
+Get the passcode: **Me tab, Guest access** (Copy / New code). On the server it is also printed once at start-up: read it in the Dokploy app logs (search for "guest code").
 
 A new code logs every guest out. Wrong tries are throttled (5 a minute).
 

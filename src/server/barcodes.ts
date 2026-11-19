@@ -263,7 +263,7 @@ async function fetchOffJson(code: string, country: string | null, lang: string |
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(OFF_TIMEOUT_MS),
-        headers: { 'User-Agent': 'MyFood/2.0 (https://food.0xpuddu.com)' },
+        headers: { 'User-Agent': 'MyFood/2.0 (https://myfood.0xpuddu.com)' },
       });
       if (res.status === 404) return null;
       if (!res.ok) {
