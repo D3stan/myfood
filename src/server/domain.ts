@@ -32,6 +32,7 @@ export function patchMe(db: Db, userId: number, b: MeBody): void {
     if (b.emoji !== undefined) run(db, 'UPDATE users SET emoji = ? WHERE id = ?', b.emoji, userId);
     if (b.notify_low !== undefined) run(db, 'UPDATE users SET notify_low = ? WHERE id = ?', b.notify_low ? 1 : 0, userId);
     if (b.notify_expiry !== undefined) run(db, 'UPDATE users SET notify_expiry = ? WHERE id = ?', b.notify_expiry ? 1 : 0, userId);
+    if (b.notify_deals !== undefined) run(db, 'UPDATE users SET notify_deals = ? WHERE id = ?', b.notify_deals ? 1 : 0, userId);
     if (b.goals) {
       for (const [k, col] of [['kcal', 'goal_kcal'], ['protein_g', 'goal_protein_g'], ['fat_g', 'goal_fat_g'], ['carbs_g', 'goal_carbs_g']] as const) {
         if (b.goals[k] !== undefined) run(db, `UPDATE users SET ${col} = ? WHERE id = ?`, b.goals[k], userId);

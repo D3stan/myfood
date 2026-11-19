@@ -31,7 +31,7 @@ function sweepJobs(): void {
 }
 export function afterState(): void { sweepJobs(); hooks.state?.(); sync(); }
 
-export async function mutate(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<boolean> {
+export async function mutate(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<boolean> {
   if (!navigator.onLine) { toast("You're offline"); return false; }
   try { receive(s, await api(method, path, body)); afterState(); return true; } catch (e) { fail(e); return false; }
 }
@@ -51,6 +51,7 @@ function resetSessionUi(): void {
   s.ui.stats = { spend: {}, nutrition: {} };
   s.ui.prices = {};
   s.ui.deals = {};
+  s.ui.dealsPlan = null; s.ui.dealsInfo = null;
   s.ui.barcodeLookup = null;
   s.ui.seenDone.clear();
   s.ui.f = {};
@@ -97,7 +98,7 @@ export function exitDemo(): void {
 export const signedOut = (): void => {
   if (s.ui.demo) { exitDemo(); return; }
   s.server = null; s.pending = []; s.ui.loggedOut = true; s.ui.sheet = null; s.ui.tab = 'pantry';
-  s.ui.newToken = null; s.ui.newCode = null; s.ui.data = null; s.ui.stats = { spend: {}, nutrition: {} }; s.ui.prices = {}; s.ui.deals = {}; s.ui.barcodeLookup = null; s.ui.page = [];
+  s.ui.newToken = null; s.ui.newCode = null; s.ui.data = null; s.ui.stats = { spend: {}, nutrition: {} }; s.ui.prices = {}; s.ui.deals = {}; s.ui.dealsPlan = null; s.ui.dealsInfo = null; s.ui.barcodeLookup = null; s.ui.page = [];
   clear(); commit();
 };
 onUnauthorized(signedOut);

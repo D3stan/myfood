@@ -2,6 +2,7 @@ import { html } from '../../html.ts';
 import type { Html } from '../../html.ts';
 import type { V } from '../components/bits.ts';
 import { data } from './data.ts';
+import { dealsPage, storesPage } from '../deals/screen.ts';
 import { goals } from '../nutrition/goals.ts';
 import { household } from './household.ts';
 import { mcp } from './mcp.ts';
@@ -18,10 +19,12 @@ export const PAGES: Record<string, { title: string; render: (v: V) => Html }> = 
   presets: { title: 'Presets', render: presets },
   siri: { title: 'Siri Shortcut', render: siri },
   mcp: { title: 'MCP', render: mcp },
+  stores: { title: 'Stores', render: storesPage },
+  deals: { title: 'Deals', render: dealsPage },
   data: { title: 'Data', render: data },
 };
 
-const rows: [string, string][] = [['profile', 'Profile'], ['goals', 'Nutrition goals'], ['household', 'Household'], ['presets', 'Presets'], ['siri', 'Siri Shortcut'], ['mcp', 'MCP'], ['data', 'Data']];
+const rows: [string, string][] = [['profile', 'Profile'], ['goals', 'Nutrition goals'], ['household', 'Household'], ['presets', 'Presets'], ['stores', 'Stores'], ['siri', 'Siri Shortcut'], ['mcp', 'MCP'], ['data', 'Data']];
 
 function settings() {
   return html`

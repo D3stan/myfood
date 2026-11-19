@@ -6,6 +6,7 @@ import type { BarcodeLookupFn } from './barcodes.ts';
 import type { Db } from './db.ts';
 import { all, get } from './db.ts';
 import { fail } from './domain.ts';
+import type { MatchOffers } from './deals/matcher.ts';
 
 /** What every feature's `registerXTools(server, ctx)` receives. */
 export interface McpCtx {
@@ -17,6 +18,9 @@ export interface McpCtx {
   build?: string;
   lookupBarcode?: BarcodeLookupFn;
   onLowCrossings?: (prevStocks: Map<number, number>) => Promise<void>;
+  /** Outbound HTTP and the offer matcher for `sync_catalogs`. */
+  fetch?: typeof fetch;
+  matchOffers?: MatchOffers;
 }
 
 export const READ_ANNOTATIONS: ToolAnnotations = {

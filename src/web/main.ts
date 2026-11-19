@@ -32,6 +32,9 @@ if (demo) {
     if (path.startsWith('/api/stats/')) return { paid: [], ate: [], rows: [] } as never;
     if (path.endsWith('/prices')) return [] as never;
     if (path.endsWith('/deals')) return { normal: null, offers: [] } as never;
+    if (path === '/api/deals/plan') return { generated_at: 0, today: '', trips: [], items: [], total_saving_cents: 0 } as never;
+    if (path === '/api/deals/catalogs') return { stores: [], catalogs: [], lat: 55.6761, lng: 12.5683, radius_m: 5000 } as never;
+    if (path === '/api/deals/sync') return { stores: [], newOffers: 0 } as never;
     const op = path === '/api/events' ? { type: 'event' as const, body: body as EventBody }
       : method === 'DELETE' && path.startsWith('/api/events/') ? { type: 'undo' as const, cid: path.split('/').pop()! } : null;
     st = { ...(op ? applyOps(st, [op]) : st), rev: st.rev + 1 };

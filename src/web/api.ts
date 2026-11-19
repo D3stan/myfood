@@ -4,6 +4,8 @@ import type {
   BarcodeLookup,
   CookBody,
   DataInfo,
+  DealsInfo,
+  DealsPlan,
   ExpenseBody,
   ItemDeals,
   ItemPrice,
@@ -31,7 +33,7 @@ export const useFake = (f: Fake | null): void => { fake = f; };
 let unauthorized: () => void = () => {};
 export const onUnauthorized = (f: () => void): void => { unauthorized = f; };
 
-async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   if (fake) return fake(method, path, body) as unknown as Promise<T>;
   const headers: Record<string, string> = {};
   const init: RequestInit = { method, credentials: 'same-origin', headers };
@@ -48,7 +50,7 @@ async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: str
   return data as T;
 }
 
-export function api(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<State> {
+export function api(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<State> {
   return request<State>(method, path, body);
 }
 
@@ -87,5 +89,8 @@ export const getStats = <K extends keyof StatsMap>(kind: K, from: string, to: st
   request<StatsMap[K]>('GET', `/api/stats/${kind}?from=${from}&to=${to}`);
 export const getItemPrices = (id: number): Promise<ItemPrice[]> => request<ItemPrice[]>('GET', `/api/items/${id}/prices`);
 export const getItemDeals = (id: number): Promise<ItemDeals> => request<ItemDeals>('GET', `/api/items/${id}/deals`);
+export const getDealsPlan = (): Promise<DealsPlan> => request<DealsPlan>('GET', '/api/deals/plan');
+export const getDealsInfo = (): Promise<DealsInfo> => request<DealsInfo>('GET', '/api/deals/catalogs');
+export const syncDeals = (): Promise<unknown> => request<unknown>('POST', '/api/deals/sync');
 export const getData = (): Promise<DataInfo> => request<DataInfo>('GET', '/api/data');
 export const rotateCode = (): Promise<{ code: string; state: State }> => request<{ code: string; state: State }>('POST', '/api/me/code');

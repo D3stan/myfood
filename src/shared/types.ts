@@ -151,7 +151,7 @@ export interface AiInput {
 
 export interface User { id: number; name: string; emoji: string }
 export interface Goals { kcal: number | null; protein_g: number | null; fat_g: number | null; carbs_g: number | null }
-export interface Me extends User { notify_low: boolean; notify_expiry: boolean; goals: Goals }
+export interface Me extends User { notify_low: boolean; notify_expiry: boolean; notify_deals: boolean; goals: Goals }
 
 export interface Item {
   id: number;
@@ -314,6 +314,20 @@ export interface ItemDeal {
   price_cents: number; unit_cents: number; valid_from: string; valid_to: string; pct_off: number | null;
 }
 export interface ItemDeals { normal: NormalPrice | null; offers: ItemDeal[] }
+/** GET /api/deals/plan. Computed on every call, never stored. */
+export interface PlanTripItem { item_id: number; name: string; emoji: string; packs: number; unit_cents: number; saving_cents: number; reason: string; offer_title: string }
+export interface PlanTrip { date: string; store_id: string; store_name: string; store_emoji: string; items: PlanTripItem[]; saving_cents: number }
+export interface PlanItem {
+  item_id: number; name: string; emoji: string; rate: number | null; normal_cents: number | null; pct_off: number;
+  packs: number; reason: string; offer_title: string; store_id: string; store_name: string; store_emoji: string;
+  unit_cents: number; valid_from: string; valid_to: string; on_trip: boolean;
+}
+export interface DealsPlan { generated_at: number; today: string; trips: PlanTrip[]; items: PlanItem[]; total_saving_cents: number }
+export interface DealsSummary { date: string; store_name: string; store_emoji: string; saving_cents: number; deal_count: number }
+export interface DealStore { id: string; name: string; emoji: string; enabled: boolean; last_synced_at: number | null; last_error: string | null }
+export interface DealsInfo { stores: DealStore[]; catalogs: { id: number; store_id: string; title: string; valid_from: string; valid_to: string; offer_count: number }[]; lat: number; lng: number; radius_m: number }
+export const DealStoreBody = z.object({ enabled: z.boolean() });
+export const DealLocationBody = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), radius_m: z.number().int().min(100).max(50000) });
 export const DealMatchBody = z.object({ offer_key: z.string().min(1), item_id: z.number().int().nullable(), qty_per_pack: z.number().positive().optional() });
 
 export interface BarcodeProduct {
@@ -376,6 +390,8 @@ export interface State {
   daily_nutrition: DailyNutrition[];
   /** Passcode for the read-only /guest page. Only ever sent to signed-in people. */
   guest_code: string;
+  /** The first trip of the shopping plan; null when there is none. */
+  deals_summary: DealsSummary | null;
 }
 
 export interface Health { ok: true; build: string; ai: boolean | null }
@@ -451,6 +467,7 @@ export const MeBody = z.object({
   emoji: emoji.optional(),
   notify_low: z.boolean().optional(),
   notify_expiry: z.boolean().optional(),
+  notify_deals: z.boolean().optional(),
   goals: z.object({ kcal: goal, protein_g: goal, fat_g: goal, carbs_g: goal }).optional(),
 });
 export type MeBody = z.infer<typeof MeBody>;

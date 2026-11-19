@@ -7,6 +7,7 @@ import { all, get, getMeta, getRev } from './db.ts';
 import { allStock } from './domain.ts';
 import { annotateLevelReadings, mapEvents } from './events/repo.ts';
 import type { EventRow } from './events/repo.ts';
+import { dealsSummary } from './deals/plan.ts';
 import { dailyNutrition } from './nutrition/repo.ts';
 import { listPresets } from './presets/repo.ts';
 import { hasPushSubscriptions } from './push.ts';
@@ -145,9 +146,9 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     created_at: j.created_at,
   }));
 
-  const meRow = get<{ id: number; name: string; emoji: string; notify_low: number; notify_expiry: number; goal_kcal: number | null; goal_protein_g: number | null; goal_fat_g: number | null; goal_carbs_g: number | null }>(
+  const meRow = get<{ id: number; name: string; emoji: string; notify_low: number; notify_expiry: number; notify_deals: number; goal_kcal: number | null; goal_protein_g: number | null; goal_fat_g: number | null; goal_carbs_g: number | null }>(
     db,
-    'SELECT id, name, emoji, notify_low, notify_expiry, goal_kcal, goal_protein_g, goal_fat_g, goal_carbs_g FROM users WHERE id = ?',
+    'SELECT id, name, emoji, notify_low, notify_expiry, notify_deals, goal_kcal, goal_protein_g, goal_fat_g, goal_carbs_g FROM users WHERE id = ?',
     userId,
   )!;
   const me: Me = {
@@ -156,6 +157,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     emoji: meRow.emoji,
     notify_low: !!meRow.notify_low,
     notify_expiry: !!meRow.notify_expiry,
+    notify_deals: !!meRow.notify_deals,
     goals: { kcal: meRow.goal_kcal, protein_g: meRow.goal_protein_g, fat_g: meRow.goal_fat_g, carbs_g: meRow.goal_carbs_g },
   };
 
@@ -181,5 +183,6 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     expenses,
     daily_nutrition,
     guest_code: getMeta(db, 'guest_code') ?? '',
+    deals_summary: dealsSummary(db, env.now),
   };
 }

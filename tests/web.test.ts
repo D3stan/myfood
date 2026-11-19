@@ -808,3 +808,26 @@ describe('siri shortcuts and guest card', () => {
     expect(log).toContain('"mode" = "log"');
   });
 });
+
+describe('deals UI', () => {
+  test('pantry strip, deals page and stores page render', () => {
+    const s = fresh();
+    expect(appHtml(s, new Date(fixture.now))).not.toContain('deals-strip');
+    s.server!.deals_summary = { date: isoDate(fixture.now), store_name: 'Netto', store_emoji: '🟡', saving_cents: 4800, deal_count: 5 };
+    expect(appHtml(s, new Date(fixture.now))).toMatch(/Today at Netto<\/b> · 5 items · save 48/);
+    s.ui.page = ['deals'];
+    s.ui.dealsPlan = {
+      generated_at: 0, today: isoDate(fixture.now), total_saving_cents: 4800, items: [],
+      trips: [{ date: isoDate(fixture.now), store_id: 'netto-dk', store_name: 'Netto', store_emoji: '🟡', saving_cents: 4800, items: [{ item_id: 1, name: 'Eggs', emoji: '🥚', packs: 2, unit_cents: 150, saving_cents: 4800, reason: '2 packs', offer_title: 'Eggs 10 pk' }] }],
+    };
+    const deals = appHtml(s, new Date(fixture.now));
+    expect(deals).toContain('Eggs');
+    expect(deals).toContain('data-a="syncDeals"');
+    s.ui.page = ['stores'];
+    s.ui.dealsInfo = { stores: [{ id: 'netto-dk', name: 'Netto', emoji: '🟡', enabled: true, last_synced_at: null, last_error: 'boom' }], catalogs: [], lat: 55.6, lng: 12.5, radius_m: 5000 };
+    const stores = appHtml(s, new Date(fixture.now));
+    expect(stores).toContain('data-c="toggleStore"');
+    expect(stores).toContain('boom');
+    expect(stores).toContain('data-f="dealRadius"');
+  });
+});

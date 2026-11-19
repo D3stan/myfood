@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { serve } from '@hono/node-server';
 import { runAi } from './ai/agy.ts';
 import { matchOffersAi } from './deals/matcher.ts';
+import { checkDealsSync } from './deals/sync.ts';
 import { openDb } from './db.ts';
 import { guestCode } from './guest.ts';
 import { checkExpiryPushes, ensureVapidKeys } from './push.ts';
@@ -25,10 +26,11 @@ ensureVapidKeys(db);
 const buildFile = join(webDir, 'build.txt');
 const build = existsSync(buildFile) ? readFileSync(buildFile, 'utf8').trim() : 'dev';
 
+const matchOffers = matchOffersAi(jobsDir);
 const app = createApp({
   db,
   runAi,
-  matchOffers: matchOffersAi(jobsDir),
+  matchOffers,
   dataDir,
   jobsDir,
   build,
@@ -38,8 +40,9 @@ const app = createApp({
 });
 serve({ fetch: app.fetch, port, hostname: host }, i => console.log(`MyFood ${build} on http://${host}:${i.port} (guest code: ${guestCode(db)})`));
 
-// Check expiry notifications every 15 minutes during the morning window (08:00-09:59 local time).
+// Every 15 minutes: expiry notifications in the morning window (08:00-09:59 local time), and the catalog sync once per slot.
 setInterval(() => {
+  void checkDealsSync(db, { fetch, now: Date.now, matchOffers });
   const hour = new Date().getHours();
   if (hour >= 8 && hour < 10) {
     void checkExpiryPushes(db).catch(err => console.error('[push] expiry check failed', err));

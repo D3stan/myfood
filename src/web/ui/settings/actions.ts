@@ -30,6 +30,7 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
       emoji: (f.meEmoji ?? me.emoji).trim() || me.emoji,
       notify_low: f.notifyLow !== undefined ? f.notifyLow === '1' : me.notify_low,
       notify_expiry: f.notifyExpiry !== undefined ? f.notifyExpiry === '1' : me.notify_expiry,
+      notify_deals: f.notifyDeals !== undefined ? f.notifyDeals === '1' : me.notify_deals,
     };
     if (await mutate('PATCH', '/api/me', body)) {
       delete f.meName; delete f.meEmoji; toast('Saved');
@@ -40,6 +41,7 @@ export const settingsActions: Record<string, (el: HTMLElement) => void | Promise
     await mutate('PATCH', '/api/me', {
       notify_low: f.notifyLow !== undefined ? f.notifyLow === '1' : me.notify_low,
       notify_expiry: f.notifyExpiry !== undefined ? f.notifyExpiry === '1' : me.notify_expiry,
+      notify_deals: f.notifyDeals !== undefined ? f.notifyDeals === '1' : me.notify_deals,
     });
   },
   saveSettings: async () => {

@@ -36,6 +36,10 @@ export function profile({ st, ui }: V) {
         <input type="checkbox" data-f="notifyExpiry" ${st.me.notify_expiry ? 'checked' : ''}>
         <span>Daily expiry reminder (~09:00)</span>
       </label>
+      <label class="row" style="gap:8px;align-items:center;margin:8px 0;cursor:pointer">
+        <input type="checkbox" data-f="notifyDeals" ${st.me.notify_deals ? 'checked' : ''}>
+        <span>Shopping trip when new deals arrive</span>
+      </label>
       <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
         ${!ui.pushSupported
           ? html`<span class="small muted">Push notifications are not supported in this browser.</span>`

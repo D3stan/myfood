@@ -1,5 +1,8 @@
-import { bumpRev, get, getMeta, run, transaction } from '../db.ts';
+import { addDays, isoDate } from '../../shared/dates.ts';
+import { bumpRev, get, getMeta, run, setMeta, transaction } from '../db.ts';
 import type { Db } from '../db.ts';
+import { checkDealsPushes } from '../push.ts';
+import type { PushSender } from '../push.ts';
 import { matchNewOffers } from './matcher.ts';
 import type { MatchOffers } from './matcher.ts';
 import { listStores } from './repo.ts';
@@ -62,4 +65,24 @@ export async function syncStores(db: Db, deps: SyncDeps): Promise<SyncResult> {
   if (await matchNewOffers(db, deps.matchOffers, deps.now())) changed = true;
   if (changed) bumpRev(db);
   return result;
+}
+
+/** Latest sync slot (06:00 or 17:00 local) that has started, e.g. `2026-11-19T06`; before 06:00 it is yesterday's 17:00. */
+export function dealsSlot(now: number): string {
+  const h = new Date(now).getHours();
+  return h >= 17 ? `${isoDate(now)}T17` : h >= 6 ? `${isoDate(now)}T06` : `${addDays(now, -1)}T17`;
+}
+
+/** Called every 15 minutes: syncs once per slot (a missed slot is caught up, only the latest), then pushes the plan. Never throws. */
+export async function checkDealsSync(db: Db, deps: SyncDeps, sendPush?: PushSender): Promise<boolean> {
+  const slot = dealsSlot(deps.now());
+  if (getMeta(db, 'deals_sync_slot') === slot) return false;
+  setMeta(db, 'deals_sync_slot', slot); // before the run: a slow or failing sync is not retried every 15 minutes
+  try {
+    await syncStores(db, deps);
+    await checkDealsPushes(db, sendPush, deps.now());
+  } catch (e) {
+    console.error('[deals] scheduled sync failed:', e instanceof Error ? e.message : e);
+  }
+  return true;
 }
