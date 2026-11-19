@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { isoDate } from '../../shared/dates.ts';
 import { runAgy } from '../ai/agy.ts';
 import { all, get, run, transaction } from '../db.ts';
 import type { Db } from '../db.ts';
@@ -46,15 +47,18 @@ export const matchOffersAi = (dir: string): MatchOffers => async ({ items, offer
 /** Matches offer_keys that have no `offer_matches` row yet. Failures leave them unmatched for the next sync; returns how many were stored. */
 export async function matchNewOffers(db: Db, matchOffers: MatchOffers | undefined, now: number): Promise<number> {
   const fresh = all<{ offer_key: string; title: string; unit: string | null; unit_qty: number | null; ean: string | null }>(db, `
-    SELECT offer_key, title, unit, unit_qty, ean FROM offers WHERE id IN (SELECT MIN(id) FROM offers GROUP BY offer_key)
-      AND offer_key NOT IN (SELECT offer_key FROM offer_matches) ORDER BY id`);
+    SELECT offer_key, title, unit, unit_qty, ean FROM offers WHERE id IN (SELECT MIN(id) FROM offers WHERE valid_to >= ? GROUP BY offer_key)
+      AND offer_key NOT IN (SELECT offer_key FROM offer_matches
+        -- an AI 'no match' is asked again once a newer item exists
+        WHERE NOT (item_id IS NULL AND source = 'ai' AND updated_at < (SELECT COALESCE(MAX(created_at), 0) FROM items)))
+      ORDER BY id`, isoDate(now));
   if (!fresh.length) return 0;
   let stored = 0;
   const rest: typeof fresh = [];
   transaction(db, () => {
     for (const o of fresh) {
       const hit = o.ean ? get<{ item_id: number }>(db, 'SELECT item_id FROM barcodes WHERE code = ? AND item_id IS NOT NULL', o.ean) : undefined;
-      if (hit) { setMatch(db, o.offer_key, hit.item_id, null, 1, 'barcode', now); stored++; } else rest.push(o);
+      if (hit) { setMatch(db, o.offer_key, hit.item_id, null, 1, 'barcode', now, true); stored++; } else rest.push(o);
     }
   });
   const batch = rest.slice(0, BATCH);
@@ -67,7 +71,7 @@ export async function matchNewOffers(db: Db, matchOffers: MatchOffers | undefine
       for (const m of res) {
         if (!keys.has(m.offer_key) || (m.item_id !== null && !ids.has(m.item_id))) continue;
         const ignore = m.item_id === null || m.confidence < MIN_CONFIDENCE;
-        setMatch(db, m.offer_key, ignore ? null : m.item_id, m.qty_per_pack, m.confidence, 'ai', now);
+        setMatch(db, m.offer_key, ignore ? null : m.item_id, m.qty_per_pack, m.confidence, 'ai', now, true); // only unmatched or stale-ignored keys get here, never manual ones
         stored++;
       }
     });

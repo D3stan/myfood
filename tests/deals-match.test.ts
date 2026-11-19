@@ -78,6 +78,23 @@ describe('matchNewOffers', () => {
   });
 });
 
+describe('matchNewOffers freshness', () => {
+  test('skips expired offers; asks again about an AI "no match" once a newer item exists, never a manual one', async () => {
+    const { db } = setup();
+    offer(db, { key: 'old', to: '2026-11-10' });
+    offer(db, { key: 'skyr' }); offer(db, { key: 'man' });
+    db.exec("INSERT INTO offer_matches(offer_key, item_id, confidence, source, updated_at) VALUES ('skyr', NULL, 0.9, 'ai', 5), ('man', NULL, 1, 'manual', 5)");
+    const ai = vi.fn<MatchOffers>(async () => [{ offer_key: 'skyr', item_id: 9, qty_per_pack: 450, confidence: 0.9 }]);
+    await matchNewOffers(db, ai, NOW);
+    expect(ai).not.toHaveBeenCalled(); // nothing new: 'old' expired, both ignores are newer than every item
+    db.exec("INSERT INTO items(id, name, name_key, emoji, category, unit, step, pack_size, created_at) VALUES (9, 'skyr', 'skyr', 'x', 'dairy', 'g', 1, 450, 10)");
+    await matchNewOffers(db, ai, NOW);
+    expect(ai.mock.calls[0]![0].offers.map(o => o.offer_key)).toEqual(['skyr']);
+    expect(matches(db).skyr).toMatchObject({ item_id: 9, qty_per_pack: 450 });
+    expect(matches(db).man.item_id).toBeNull();
+  });
+});
+
 describe('normalPrice', () => {
   const buy = (db: Db, cid: string, day: number, item: number, qty: number, cost: number, lines = 1) => {
     db.prepare("INSERT INTO events(cid, seq, user_id, at, kind, source, cost_cents) VALUES (?, ?, 1, ?, 'buy', 'manual', ?)").run(cid, ++ext, at(day), lines === 1 ? cost : null);
