@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { DealLocationBody, EventBody } from '../../shared/types.ts';
 import { isoDate } from '../../shared/dates.ts';
+import { shoppingList } from '../../shared/deals.ts';
 import { aliasKey } from '../../shared/text.ts';
 import { all, get, getMeta, transaction } from '../db.ts';
 import { DEFAULT_CURRENCY } from '../../shared/currency.ts';
@@ -10,7 +11,7 @@ import { fail } from '../domain.ts';
 import { IDEMPOTENT_WRITE_ANNOTATIONS, READ_ANNOTATIONS, WRITE_ANNOTATIONS, okResult, resolveUserId, runTool } from '../mcp-kit.ts';
 import type { McpCtx } from '../mcp-kit.ts';
 import { createEvent, hydrateEventByCid } from '../events/repo.ts';
-import { requireActiveItems } from '../items/repo.ts';
+import { loadHydratedItems, requireActiveItems } from '../items/repo.ts';
 import { buildPlan } from './plan.ts';
 import { dealsInfo, linkOffer, setLocation, setStoreEnabled } from './repo.ts';
 import { syncStores } from './sync.ts';
@@ -20,7 +21,7 @@ export function registerDealsTools(server: McpServer, { db, now, defaultUserId, 
     'get_shopping_plan',
     {
       title: 'Get Shopping Plan',
-      description: 'The deals-based shopping plan, computed now: which store and day to shop, which items and how many packs, with the saving. Also lists every matched deal with its reason, the stores (enabled, last sync, last error), the household location and unmatched_offer_count (live offers not yet matched to an item; one sync matches at most 300 new names).',
+      description: 'The deals-based shopping plan, computed now: which store and day to shop, which items and how many packs, with the saving. Also returns shopping_list_text (planned trips plus shared low items, no prices) and lists every matched deal with its reason, the stores (enabled, last sync, last error), the household location and unmatched_offer_count (live offers not yet matched to an item; one sync matches at most 300 new names).',
       inputSchema: {},
       annotations: READ_ANNOTATIONS,
     },
@@ -33,7 +34,7 @@ export function registerDealsTools(server: McpServer, { db, now, defaultUserId, 
         plan.trips.length
           ? `${plan.trips.length} trip(s), saving ${plan.total_saving_cents} minor units: ${plan.trips.map(t => `${t.date} ${t.store_name} (${t.items.length} items)`).join('; ')}.`
           : 'No shopping trip is worth planning right now.',
-        { ...plan, stores, location: { lat, lng, radius_m }, unmatched_offer_count: unmatched },
+        { ...plan, shopping_list_text: shoppingList(loadHydratedItems(db, now()).filter(i => i.is_low && i.owner_id == null), plan), stores, location: { lat, lng, radius_m }, unmatched_offer_count: unmatched },
       );
     }),
   );

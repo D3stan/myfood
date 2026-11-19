@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { burnRate, campaigns, planTrips, promoCadence, stockUp, type StockUpIn } from '../src/shared/deals.ts';
+import { burnRate, campaigns, planTrips, promoCadence, shoppingList, stockUp, type StockUpIn } from '../src/shared/deals.ts';
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 10, 19, 12);
@@ -219,5 +219,20 @@ describe('planTrips', () => {
     expect(r.trips).toHaveLength(1);
     expect(r.trips[0]).toMatchObject({ day: 0, store_id: 's2', saving_cents: 0 });
     expect(r.trips[0]!.items.map(i => i.item_id)).toEqual([1, 2]);
+  });
+});
+
+describe('shoppingList', () => {
+  const low = [{ id: 1, name: 'Butter' }, { id: 2, name: 'Salt' }];
+  const trip = { date: '2026-11-19', store_id: 'netto-dk', store_name: 'Netto', store_emoji: '🟡', saving_cents: 500, items: [{ item_id: 1, name: 'Butter', emoji: '🧈', packs: 2, unit_cents: 150, saving_cents: 500, reason: 'r', offer_title: 't', qty_per_pack: 10, price_cents: 1500 }] };
+  test('no plan or no trips keeps the plain list', () => {
+    const plain = 'Shopping list\n- Butter\n- Salt';
+    expect(shoppingList(low, null)).toBe(plain);
+    expect(shoppingList(low, { today: '2026-11-19', trips: [] })).toBe(plain);
+  });
+  test('groups by trip, no repeats under Anywhere, no prices', () => {
+    const out = shoppingList(low, { today: '2026-11-19', trips: [trip] });
+    expect(out).toBe('Shopping list\nToday · Netto\n- 2 × Butter\nAnywhere\n- Salt');
+    expect(out).not.toMatch(/150|1500|500/);
   });
 });
