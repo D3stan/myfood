@@ -24,7 +24,7 @@ export const PAGES: Record<string, { title: string; render: (v: V) => Html }> = 
   data: { title: 'Data', render: data },
 };
 
-const rows: [string, string][] = [['profile', 'Profile'], ['goals', 'Nutrition goals'], ['household', 'Household'], ['presets', 'Presets'], ['stores', 'Stores'], ['siri', 'Siri Shortcut'], ['mcp', 'MCP'], ['data', 'Data']];
+const rows: [string, string][] = [['profile', 'Profile'], ['goals', 'Nutrition goals'], ['household', 'Household'], ['presets', 'Presets'], ['deals', 'Deals'], ['stores', 'Stores'], ['siri', 'Siri Shortcut'], ['mcp', 'MCP'], ['data', 'Data']];
 
 function settings() {
   return html`
