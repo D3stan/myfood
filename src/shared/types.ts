@@ -308,6 +308,13 @@ export interface NutritionStats { from: string; to: string; rows: DailyNutrition
 export interface StatsMap { spend: SpendStats; nutrition: NutritionStats }
 /** GET /api/items/:id/prices: per-unit price of a priced buy, newest first. */
 export interface ItemPrice { at: number; unit_cents: number }
+export interface NormalPrice { cents_per_unit: number; basis: 'buys' | 'item' }
+export interface ItemDeal {
+  id: number; store_id: string; store_name: string; store_emoji: string; title: string;
+  price_cents: number; unit_cents: number; valid_from: string; valid_to: string; pct_off: number | null;
+}
+export interface ItemDeals { normal: NormalPrice | null; offers: ItemDeal[] }
+export const DealMatchBody = z.object({ offer_key: z.string().min(1), item_id: z.number().int().nullable(), qty_per_pack: z.number().positive().optional() });
 
 export interface BarcodeProduct {
   code: string;

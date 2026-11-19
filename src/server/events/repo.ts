@@ -193,7 +193,7 @@ export function insertEvent(db: Db, e: NewEvent): number {
 }
 
 /** One row per live, non-set buy line of item ?1: when, and its per-unit price `u` (a lone line without its own cost takes the event cost). */
-const PRICED_BUYS = `SELECT e.at, e.seq, COALESCE(l.cost_cents, CASE WHEN (SELECT COUNT(*) FROM event_lines x WHERE x.event_cid = e.cid) = 1 THEN e.cost_cents END) * 1.0 / l.qty AS u
+export const PRICED_BUYS = `SELECT e.at, e.seq, COALESCE(l.cost_cents, CASE WHEN (SELECT COUNT(*) FROM event_lines x WHERE x.event_cid = e.cid) = 1 THEN e.cost_cents END) * 1.0 / l.qty AS u
   FROM event_lines l JOIN events e ON e.cid = l.event_cid
   WHERE l.item_id = ?1 AND e.kind = 'buy' AND e.undone_at IS NULL AND l.is_set = 0 AND l.qty > 0`;
 

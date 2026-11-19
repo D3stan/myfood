@@ -50,6 +50,7 @@ function resetSessionUi(): void {
   s.ui.data = null;
   s.ui.stats = { spend: {}, nutrition: {} };
   s.ui.prices = {};
+  s.ui.deals = {};
   s.ui.barcodeLookup = null;
   s.ui.seenDone.clear();
   s.ui.f = {};
@@ -96,7 +97,7 @@ export function exitDemo(): void {
 export const signedOut = (): void => {
   if (s.ui.demo) { exitDemo(); return; }
   s.server = null; s.pending = []; s.ui.loggedOut = true; s.ui.sheet = null; s.ui.tab = 'pantry';
-  s.ui.newToken = null; s.ui.newCode = null; s.ui.data = null; s.ui.stats = { spend: {}, nutrition: {} }; s.ui.prices = {}; s.ui.barcodeLookup = null; s.ui.page = [];
+  s.ui.newToken = null; s.ui.newCode = null; s.ui.data = null; s.ui.stats = { spend: {}, nutrition: {} }; s.ui.prices = {}; s.ui.deals = {}; s.ui.barcodeLookup = null; s.ui.page = [];
   clear(); commit();
 };
 onUnauthorized(signedOut);

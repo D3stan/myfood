@@ -25,11 +25,14 @@ const E = {
 const NOT_SIGNED_IN = /not (logged|signed) in|log ?in required|sign ?in required|please (log|sign) ?in|unauthenticated|unauthorized|authentication (failed|required)|no (valid )?credentials|oauth|invalid_grant|\b401\b/i;
 
 export function buildArgv(input: AiInput, timeoutMs: number, env = process.env): string[] {
-  const args = ['-p', buildPrompt(input), '--output-format', 'json', '--json-schema', SCHEMA,
+  return argv(buildPrompt(input), SCHEMA, timeoutMs, env);
+}
+
+function argv(prompt: string, schema: string, timeoutMs: number, env = process.env): string[] {
+  return ['-p', prompt, '--output-format', 'json', '--json-schema', schema,
     '--print-timeout', `${Math.max(1, Math.floor(timeoutMs / 1000) - 2)}s`,
     '--model', env.AI_MODEL || DEFAULT_MODEL, '--effort', env.AI_EFFORT || 'low',
     '--settings', SETTINGS, '--disable-slash-commands'];
-  return args;
 }
 
 interface Run { code: number | null; stdout: string; stderr: string; timedOut: boolean; tooBig: boolean; spawnError?: NodeJS.ErrnoException }
@@ -50,10 +53,11 @@ function run(cmd: string[], args: string[], cwd: string, timeoutMs: number): Pro
 
 const parse = (s: unknown): unknown => { try { return typeof s === 'string' ? JSON.parse(s) : s; } catch { return undefined; } };
 
-export async function runAi(input: AiInput): Promise<AiResult> {
+/** Runs agy once with `prompt` and a JSON schema; returns the structured output (unvalidated). `deniedMsg` is the error when agy was refused a tool. */
+export async function runAgy(prompt: string, schema: object, dir: string, deniedMsg = E.failed): Promise<unknown> {
   const cmd = (process.env.AI_CMD || 'agy').trim().split(/\s+/);
   const timeoutMs = Number(process.env.AI_TIMEOUT_MS) || 180_000;
-  const r = await run(cmd, buildArgv(input, timeoutMs), input.dir, timeoutMs);
+  const r = await run(cmd, argv(prompt, JSON.stringify(schema), timeoutMs), dir, timeoutMs);
   const fail = (msg: string): never => {
     console.error(`[ai] ${msg} exit=${r.code} stderr=${r.stderr.trim().slice(-1500)}`);
     throw new Error(msg);
@@ -69,11 +73,15 @@ export async function runAi(input: AiInput): Promise<AiResult> {
     // 127 is the shell's "command not found": the wrapper ran but there is no agy binary behind it.
     if (r.code === 127) return fail(E.missing);
     if (NOT_SIGNED_IN.test(r.stderr) || NOT_SIGNED_IN.test(r.stdout)) return fail(E.login);
-    if (o?.denied_actions?.length) return fail(input.images.length ? E.photo : E.failed);
+    if (o?.denied_actions?.length) return fail(deniedMsg);
     if (r.code !== 0 || (o && o.status && o.status !== 'SUCCESS')) return fail(E.failed);
     return fail(E.nonsense);
   }
+  return structured;
+}
 
+export async function runAi(input: AiInput): Promise<AiResult> {
+  const structured = await runAgy(buildPrompt(input), z.toJSONSchema(AiResult), input.dir, input.images.length ? E.photo : E.failed);
   const res = AiResult.safeParse(structured);
   // The contract says exactly one of item_id / new_item per line, and cook needs portions or total_g plus a name if new.
   if (
@@ -81,7 +89,8 @@ export async function runAi(input: AiInput): Promise<AiResult> {
     res.data.events.some((e) => e.lines.some((l) => (l.item_id === null) === (l.new_item === null))) ||
     res.data.cook?.some((c) => (c.portions === null && c.total_g === null) || (c.meal_item_id === null && !c.name))
   ) {
-    return fail(E.nonsense);
+    console.error(`[ai] ${E.nonsense}`);
+    throw new Error(E.nonsense);
   }
   return res.data;
 }

@@ -1,9 +1,11 @@
 import { bumpRev, get, getMeta, run, transaction } from '../db.ts';
 import type { Db } from '../db.ts';
+import { matchNewOffers } from './matcher.ts';
+import type { MatchOffers } from './matcher.ts';
 import { listStores } from './repo.ts';
 import { fetchTjek } from './providers/tjek.ts';
 
-export interface SyncDeps { fetch: typeof fetch; now: () => number }
+export interface SyncDeps { fetch: typeof fetch; now: () => number; matchOffers?: MatchOffers }
 export interface SyncResult { stores: { id: string; ok: boolean; error?: string; newOffers: number }[]; newOffers: number }
 
 export async function syncStores(db: Db, deps: SyncDeps): Promise<SyncResult> {
@@ -57,6 +59,7 @@ export async function syncStores(db: Db, deps: SyncDeps): Promise<SyncResult> {
       result.stores.push({ id: store.id, ok: false, error, newOffers: 0 });
     }
   }
+  if (await matchNewOffers(db, deps.matchOffers, deps.now())) changed = true;
   if (changed) bumpRev(db);
   return result;
 }

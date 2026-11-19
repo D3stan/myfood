@@ -45,6 +45,7 @@ import { registerNutritionRoutes } from './nutrition/routes.ts';
 import { registerPresetRoutes } from './presets/routes.ts';
 import { registerSpendRoutes } from './spend/routes.ts';
 import type { RouteDeps } from './route-kit.ts';
+import type { MatchOffers } from './deals/matcher.ts';
 
 export interface Deps {
   db: Db;
@@ -61,6 +62,8 @@ export interface Deps {
   lookupBarcode?: BarcodeLookupFn;
   /** Outbound HTTP for catalog sync (tests inject a fake). Default: global fetch. */
   fetch?: typeof fetch;
+  /** Matches new catalog offers to items (tests inject a fake). Without it offers stay unmatched. */
+  matchOffers?: MatchOffers;
   /** Secret protecting the /mcp Streamable HTTP endpoint (disabled with 503 when unset). */
   mcpSecret?: string;
 }
@@ -227,7 +230,7 @@ export function createApp(deps: Deps): Hono<Env> {
     return c.json(state(c.get('uid')));
   });
 
-  const routeDeps: RouteDeps = { db, now, state, json, parse, id, pushLow, lookupBarcode: deps.lookupBarcode, fetch: deps.fetch };
+  const routeDeps: RouteDeps = { db, now, state, json, parse, id, pushLow, lookupBarcode: deps.lookupBarcode, fetch: deps.fetch, matchOffers: deps.matchOffers };
   registerEventRoutes(app, routeDeps);
   registerItemRoutes(app, routeDeps);
   registerCookingRoutes(app, routeDeps);

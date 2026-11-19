@@ -1196,6 +1196,8 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
       return bump();
     }
 
+    if (method === 'GET' && path.startsWith('/api/items/') && path.endsWith('/deals')) return { normal: null, offers: [] };
+
     if (method === 'GET' && path.startsWith('/api/items/') && path.endsWith('/prices')) {
       const id = Number(path.slice('/api/items/'.length, -'/prices'.length));
       const prices: ItemPrice[] = [];
