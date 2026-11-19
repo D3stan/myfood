@@ -71,7 +71,9 @@ export function normalPrice(db: Db, itemId: number): NormalPrice | null {
   const promo = (b: { at: number; u: number }) => { const day = isoDate(b.at); return offers.some(o => o.valid_from <= day && day <= o.valid_to && Math.abs(b.u - o.unit_cents) <= 0.05 * o.unit_cents); };
   const buys = all<{ at: number; u: number }>(db, `SELECT at, u FROM (${PRICED_BUYS}) WHERE u > 0 ORDER BY at DESC, seq DESC LIMIT 50`, itemId).filter(b => !promo(b)).slice(0, 10);
   if (buys.length) return { cents_per_unit: median(buys.map(b => b.u)), basis: 'buys' };
-  return item.cost != null && item.cost > 0 ? { cents_per_unit: item.cost, basis: 'item' } : null;
+  // Priced buys that were all promo: the item price would be a promo price too, so no normal price.
+  const hasBuys = get(db, `SELECT 1 FROM (${PRICED_BUYS}) WHERE u > 0 LIMIT 1`, itemId);
+  return !hasBuys && item.cost != null && item.cost > 0 ? { cents_per_unit: item.cost, basis: 'item' } : null;
 }
 
 /** Live and upcoming offers matched to an item, with % off against the offer's own pre_price, else the normal price. */

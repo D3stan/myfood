@@ -65,11 +65,20 @@ describe('buildPlan', () => {
     expect(p.today).toBe('2026-11-19');
     expect(p.trips).toHaveLength(1);
     expect(p.trips[0]).toMatchObject({ date: '2026-11-19', store_id: 'netto-dk', store_name: 'Netto', saving_cents: 1000 }); // 1000 ml x (2 - 1)
-    expect(p.trips[0]!.items[0]).toMatchObject({ item_id: 1, packs: 1, unit_cents: 1, offer_title: expect.stringContaining('Title') });
+    expect(p.trips[0]!.items[0]).toMatchObject({ item_id: 1, packs: 1, unit_cents: 1, offer_title: expect.stringContaining('Title'), qty_per_pack: 1000, price_cents: 1000 });
     expect(p.total_saving_cents).toBe(1000);
     expect(p.items[0]).toMatchObject({ item_id: 1, packs: 1, on_trip: true, pct_off: 50, rate: null });
     const st = (await (await req('GET', '/api/state')).json()) as State;
     expect(st.deals_summary).toMatchObject({ date: '2026-11-19', store_name: 'Netto', saving_cents: 1000, deal_count: 1 });
+  });
+
+  test('the trip item carries the pack of the lowest unit price, not the lowest pack price', async () => {
+    item(1, 'Milk');
+    offer(1, { key: 'big', price: 1500 }); // 1000 ml for 15 kr = 1.5/ml
+    db.prepare(`INSERT INTO offers(store_id, source, external_id, title, offer_key, price_cents, currency, unit, unit_qty, valid_from, valid_to, fetched_at) VALUES ('netto-dk', 'tjek', 'small', 'Small', 'small', 1000, 'DKK', 'ml', 500, '2026-11-14', '2026-11-27', 0)`).run();
+    db.prepare("INSERT INTO offer_matches(offer_key, item_id, qty_per_pack, confidence, source, updated_at) VALUES ('small', 1, 500, 1, 'manual', 0)").run(); // 500 ml for 10 kr = 2/ml
+    const t = (await plan()).trips[0]!.items[0]!;
+    expect(t).toMatchObject({ unit_cents: 1.5, qty_per_pack: 1000, price_cents: 1500 });
   });
 
   test('an item with plenty of stock is listed with 0 packs and no trip', async () => {

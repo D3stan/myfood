@@ -818,7 +818,7 @@ describe('deals UI', () => {
     s.ui.page = ['deals'];
     s.ui.dealsPlan = {
       generated_at: 0, today: isoDate(fixture.now), total_saving_cents: 4800, items: [],
-      trips: [{ date: isoDate(fixture.now), store_id: 'netto-dk', store_name: 'Netto', store_emoji: '🟡', saving_cents: 4800, items: [{ item_id: 1, name: 'Eggs', emoji: '🥚', packs: 2, unit_cents: 150, saving_cents: 4800, reason: '2 packs', offer_title: 'Eggs 10 pk' }] }],
+      trips: [{ date: isoDate(fixture.now), store_id: 'netto-dk', store_name: 'Netto', store_emoji: '🟡', saving_cents: 4800, items: [{ item_id: 1, name: 'Eggs', emoji: '🥚', packs: 2, unit_cents: 150, saving_cents: 4800, reason: '2 packs', offer_title: 'Eggs 10 pk', qty_per_pack: 10, price_cents: 1500 }] }],
     };
     const deals = appHtml(s, new Date(fixture.now));
     expect(deals).toContain('Eggs');

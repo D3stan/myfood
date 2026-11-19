@@ -86,10 +86,11 @@ export function buildPlan(db: Db, now: number): DealsPlan {
         date: t.date, store_id: t.store_id, store_name: store.store_name, store_emoji: store.store_emoji, saving_cents: t.saving_cents,
         items: t.items.map(x => {
           const it = itemRows.get(x.item_id)!;
-          const offer = cands.find(c => c.item_id === x.item_id && c.store_id === t.store_id && c.valid_from <= t.date && t.date <= c.valid_to && c.unit_cents === x.unit_cents);
+          // Cheapest live offer at that store on that date: never fails, unlike matching a float unit price.
+          const offer = cands.filter(c => c.item_id === x.item_id && c.store_id === t.store_id && c.valid_from <= t.date && t.date <= c.valid_to).reduce((b, c) => c.unit_cents < b.unit_cents ? c : b);
           return {
             item_id: x.item_id, name: it.name, emoji: it.emoji, packs: packsOf.get(x.item_id)!, unit_cents: x.unit_cents, saving_cents: x.saving_cents,
-            reason: reasonOf.get(x.item_id)!, offer_title: offer?.title ?? '',
+            reason: reasonOf.get(x.item_id)!, offer_title: offer.title, qty_per_pack: offer.qty_per_pack, price_cents: offer.price_cents,
           };
         }),
       };
