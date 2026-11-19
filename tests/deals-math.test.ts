@@ -40,21 +40,21 @@ describe('burnRate', () => {
 });
 
 describe('campaigns', () => {
-  const o = (store_id: number, valid_from: string, valid_to: string, unit_cents: number) => ({ store_id, valid_from, valid_to, unit_cents });
+  const o = (s: number, valid_from: string, valid_to: string, unit_cents: number) => ({ store_id: `s${s}`, valid_from, valid_to, unit_cents });
   test('overlapping offers merge, lowest price wins', () => {
     expect(campaigns([o(1, '2026-11-20', '2026-11-26', 900), o(1, '2026-11-24', '2026-11-30', 800)]))
-      .toEqual([{ store_id: 1, from: '2026-11-20', to: '2026-11-30', unit_cents: 800 }]);
+      .toEqual([{ store_id: 's1', from: '2026-11-20', to: '2026-11-30', unit_cents: 800 }]);
   });
   test('touching (gap 1 day) merges', () => {
     expect(campaigns([o(1, '2026-11-20', '2026-11-26', 900), o(1, '2026-11-27', '2026-12-03', 950)]))
-      .toEqual([{ store_id: 1, from: '2026-11-20', to: '2026-12-03', unit_cents: 900 }]);
+      .toEqual([{ store_id: 's1', from: '2026-11-20', to: '2026-12-03', unit_cents: 900 }]);
   });
   test('a 2-day gap stays separate', () => {
     expect(campaigns([o(1, '2026-11-20', '2026-11-26', 900), o(1, '2026-11-28', '2026-12-03', 900)])).toHaveLength(2);
   });
   test('stores stay separate, input order does not matter', () => {
     const r = campaigns([o(2, '2026-11-20', '2026-11-26', 700), o(1, '2026-11-24', '2026-11-30', 800), o(1, '2026-11-20', '2026-11-26', 900)]);
-    expect(r.map(c => c.store_id)).toEqual([1, 2]);
+    expect(r.map(c => c.store_id)).toEqual(['s1', 's2']);
     expect(r[0]).toMatchObject({ from: '2026-11-20', to: '2026-11-30' });
   });
   test('a contained offer does not shorten the campaign', () => {
@@ -142,7 +142,7 @@ describe('stockUp', () => {
 describe('planTrips', () => {
   const today = '2026-11-19';
   const need = (item_id: number, units: number, normalCents: number, deadlineDay: number | null = null) => ({ item_id, units, normalCents, deadlineDay });
-  const offer = (item_id: number, store_id: number, valid_from: string, valid_to: string, unit_cents: number) => ({ item_id, store_id, valid_from, valid_to, unit_cents });
+  const offer = (item_id: number, s: number, valid_from: string, valid_to: string, unit_cents: number) => ({ item_id, store_id: `s${s}`, valid_from, valid_to, unit_cents });
 
   test('nothing to save: no trips', () => {
     expect(planTrips({ needs: [need(1, 4, 1000)], offers: [offer(1, 1, today, today, 1200)], today })).toEqual({ trips: [], total_saving_cents: 0 });
@@ -155,7 +155,7 @@ describe('planTrips', () => {
       today,
     });
     expect(r.trips).toHaveLength(1);
-    expect(r.trips[0]).toMatchObject({ store_id: 2, day: 0, date: today, saving_cents: 3000 });
+    expect(r.trips[0]).toMatchObject({ store_id: 's2', day: 0, date: today, saving_cents: 3000 });
     expect(r.total_saving_cents).toBe(3000);
   });
   test('uses the best live price of that store on the day', () => {
@@ -172,7 +172,7 @@ describe('planTrips', () => {
     expect(mk(4).trips).toHaveLength(1); // second would add 20 kr
     const r = mk(5); // exactly 25 kr
     expect(r.trips).toHaveLength(2);
-    expect(r.trips.map(t => t.store_id)).toEqual([1, 2]);
+    expect(r.trips.map(t => t.store_id)).toEqual(['s1', 's2']);
     expect(r.total_saving_cents).toBe(5000 + 2500);
   });
   test('each item goes to the trip where it saves most', () => {
@@ -183,16 +183,16 @@ describe('planTrips', () => {
     const r = planTrips({ needs: [need(1, 10, 1000), need(2, 10, 1000), need(3, 10, 1000)], offers, today });
     expect(r.trips).toHaveLength(2);
     const byStore = Object.fromEntries(r.trips.map(t => [t.store_id, t.items.map(i => i.item_id).sort()]));
-    expect(byStore).toEqual({ 1: [3], 2: [1, 2] });
+    expect(byStore).toEqual({ s1: [3], s2: [1, 2] });
   });
   test('deadline 0 forces the first trip to be today', () => {
     const offers = [offer(1, 1, today, today, 900), offer(2, 2, '2026-11-22', '2026-11-22', 100)];
     const r = planTrips({ needs: [need(1, 1, 1000, 0), need(2, 20, 1000)], offers, today, tripCostCents: 1_000_000 });
     expect(r.trips).toHaveLength(1);
-    expect(r.trips[0]).toMatchObject({ day: 0, store_id: 1 });
+    expect(r.trips[0]).toMatchObject({ day: 0, store_id: 's1' });
     // without the deadline the big saving on day 3 wins
     const free = planTrips({ needs: [need(1, 1, 1000), need(2, 20, 1000)], offers, today, tripCostCents: 1_000_000 });
-    expect(free.trips[0]).toMatchObject({ day: 3, store_id: 2 });
+    expect(free.trips[0]).toMatchObject({ day: 3, store_id: 's2' });
   });
   test('items past their deadline save nothing on a later trip', () => {
     const r = planTrips({ needs: [need(1, 10, 1000, 1)], offers: [offer(1, 1, '2026-11-22', '2026-11-22', 100)], today });

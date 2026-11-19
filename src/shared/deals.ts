@@ -26,12 +26,12 @@ export function burnRate(lines: BurnLine[], now: number): number | null {
   return days < 14 || drops < 3 ? null : used / days;
 }
 
-export interface Offer { store_id: number; valid_from: string; valid_to: string; unit_cents: number }
-export interface Campaign { store_id: number; from: string; to: string; unit_cents: number }
+export interface Offer { store_id: string; valid_from: string; valid_to: string; unit_cents: number }
+export interface Campaign { store_id: string; from: string; to: string; unit_cents: number }
 
 /** Per store, merge offers whose date ranges overlap or touch (gap of at most 1 day); the campaign keeps the lowest price. */
 export function campaigns(offers: Offer[]): Campaign[] {
-  const sorted = [...offers].sort((a, b) => a.store_id - b.store_id || a.valid_from.localeCompare(b.valid_from));
+  const sorted = [...offers].sort((a, b) => a.store_id.localeCompare(b.store_id) || a.valid_from.localeCompare(b.valid_from));
   const out: Campaign[] = [];
   for (const o of sorted) {
     const last = out[out.length - 1];
@@ -106,7 +106,7 @@ export interface TripOffer extends Offer { item_id: number }
 export interface Trip {
   day: number;
   date: string;
-  store_id: number;
+  store_id: string;
   items: { item_id: number; unit_cents: number; saving_cents: number }[];
   saving_cents: number;
 }
@@ -122,7 +122,7 @@ export function planTrips(
 ): { trips: Trip[]; total_saving_cents: number } {
   const last = offers.reduce((m, o) => (o.valid_to > m ? o.valid_to : m), today);
   const horizon = Math.max(0, daysUntil(last, parseIsoDate(today)!));
-  const stores = [...new Set(offers.map(o => o.store_id))].sort((a, b) => a - b);
+  const stores = [...new Set(offers.map(o => o.store_id))].sort();
   const cands: Trip[] = [];
   for (let day = 0; day <= horizon; day++) {
     const date = addDays(today, day);
