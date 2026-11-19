@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Idiomorph } from 'idiomorph';
 import { isoDate, isoWeek } from '../src/shared/dates.ts';
-import type { State } from '../src/shared/types.ts';
+import type { DealsPlan, State } from '../src/shared/types.ts';
 import { api, createToken, lookupBarcode, useFake } from '../src/web/api.ts';
 import { buildDemoExpenseExport, createDemoApi, createDemoState } from '../src/web/demo.ts';
 import { newStore, openSheet, store as singletonStore } from '../src/web/store.ts';
@@ -302,14 +302,14 @@ describe('login button, demo banner, and tour navigation', () => {
     s.ui.tour = { step: 0 };
     expect(isTourVisible(s)).toBe(true);
     const step0 = tourHtml(s);
-    expect(step0).toContain('1 / 6');
+    expect(step0).toContain('1 / 7');
     expect(step0).not.toContain('data-a="tourPrev"');
     expect(step0).toContain('data-a="tourNext"');
     expect(step0).toContain('Next');
 
     s.ui.tour = { step: TOUR_STEPS.length - 1 };
     const last = tourHtml(s);
-    expect(last).toContain('6 / 6');
+    expect(last).toContain('7 / 7');
     expect(last).toContain('data-a="tourPrev"');
     expect(last).toContain('Done');
 
@@ -343,18 +343,22 @@ describe('login button, demo banner, and tour navigation', () => {
 
       await actions.tourNext!(el);
       expect(singletonStore.ui.tour?.step).toBe(3);
+      expect(singletonStore.ui.tab).toBe('pantry');
+
+      await actions.tourNext!(el);
+      expect(singletonStore.ui.tour?.step).toBe(4);
       expect(singletonStore.ui.tab).toBe('spend');
 
       await actions.tourNext!(el);
-      expect(singletonStore.ui.tour?.step).toBe(4);
+      expect(singletonStore.ui.tour?.step).toBe(5);
       expect(singletonStore.ui.tab).toBe('history');
 
       await actions.tourNext!(el);
-      expect(singletonStore.ui.tour?.step).toBe(5);
+      expect(singletonStore.ui.tour?.step).toBe(6);
       expect(singletonStore.ui.tab).toBe('me');
 
       await actions.tourPrev!(el);
-      expect(singletonStore.ui.tour?.step).toBe(4);
+      expect(singletonStore.ui.tour?.step).toBe(5);
       expect(singletonStore.ui.tab).toBe('history');
 
       await actions.tourNext!(el);
@@ -370,6 +374,54 @@ describe('login button, demo banner, and tour navigation', () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe('demo deals', () => {
+  const now = new Date(2026, 10, 19, 10, 0).getTime();
+
+  test('summary, plan stub and item stub agree on a trip today', async () => {
+    const st = createDemoState(now);
+    expect(st.deals_summary?.date).toBe(isoDate(new Date(now)));
+    const call = createDemoApi(st);
+    const plan = await call('GET', '/api/deals/plan') as DealsPlan;
+    const trip = plan.trips[0]!;
+    expect(trip.date).toBe(plan.today);
+    expect(plan.today).toBe(st.deals_summary!.date);
+    expect(trip.items).toHaveLength(st.deals_summary!.deal_count);
+    expect(trip.saving_cents).toBe(st.deals_summary!.saving_cents);
+    for (const i of trip.items) {
+      expect(st.items.find(x => x.id === i.item_id)?.name).toBe(i.name);
+      expect(i.qty_per_pack).toBeGreaterThan(0);
+      expect(i.price_cents).toBeGreaterThan(0);
+    }
+    expect(plan.items.some(i => !i.on_trip && i.valid_from > plan.today)).toBe(true);
+    const info = await call('GET', '/api/deals/catalogs') as { stores: { last_synced_at: number | null }[] };
+    expect(info.stores).toHaveLength(2);
+    expect(info.stores.every(x => x.last_synced_at != null)).toBe(true);
+    const eggs = await call('GET', `/api/items/${trip.items[0]!.item_id}/deals`) as { offers: unknown[] };
+    expect(eggs.offers).toHaveLength(1);
+  });
+
+  test('after Bought these the trip leaves the plan and the Pantry strip', async () => {
+    const st = createDemoState(Date.now());
+    const call = createDemoApi(st);
+    const trip = (await call('GET', '/api/deals/plan') as DealsPlan).trips[0]!;
+    const after = await call('POST', '/api/events', {
+      cid: 'demo-trip-0001', at: Date.now(), kind: 'buy', note: trip.store_name,
+      lines: trip.items.map(i => ({ item_id: i.item_id, qty: i.packs * i.qty_per_pack, cost_cents: i.packs * i.price_cents })),
+    }) as State;
+    expect(after.deals_summary).toBeNull();
+    expect((await call('GET', '/api/deals/plan') as DealsPlan).trips).toHaveLength(0);
+  });
+
+  test('tour has a deals step whose target is in the rendered pantry', () => {
+    const step = TOUR_STEPS.find(t => t.selectors.includes('#deals-strip'))!;
+    expect(step.tab).toBe('pantry');
+    const s = newStore(createDemoState(now));
+    s.ui.demo = true;
+    s.ui.tab = 'pantry';
+    expect(appHtml(s, new Date(now))).toContain('id="deals-strip"');
   });
 });
 
