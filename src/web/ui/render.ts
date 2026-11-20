@@ -16,6 +16,7 @@ import { me } from './screens/me.ts';
 import { pantry } from './screens/pantry.ts';
 import { PAGES } from './settings/index.ts';
 import { spend } from './spend/screen.ts';
+import { syncDealMap } from './deals/map.ts';
 
 const page = (v: V, key: string): Html => {
   const p = PAGES[key];
@@ -57,7 +58,7 @@ export function sheetHtml(s: Store): string {
 
 export const toastHtml = (s: Store): string => htmlToString(toast(s.ui));
 
-const morph = (el: Element, h: string): void => { Idiomorph.morph(el, h, { morphStyle: 'innerHTML', ignoreActiveValue: true }); };
+const morph = (el: Element, h: string): void => { Idiomorph.morph(el, h, { morphStyle: 'innerHTML', ignoreActiveValue: true, callbacks: { beforeNodeMorphed: n => (n as Element).id !== 'deal-map' } }); };
 const $ = (id: string): HTMLElement => document.getElementById(id)!;
 
 let lastKey = '';
@@ -92,5 +93,6 @@ export function render(s: Store): void {
     Idiomorph.morph(tourEl, tourHtml(s), { morphStyle: 'innerHTML' });
     syncTour(s);
   }
+  syncDealMap(s);
   document.title = 'MyFood';
 }

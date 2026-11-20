@@ -109,7 +109,7 @@ export function itemSheet(v: V, sh: Sheet) {
       <button class="${!usePortions ? 'on' : ''}" data-a="portionMode" data-v="0">Grams</button>
     </div>` : ''}
     ${it.unit === 'level'
-      ? html`<div class="row wrap">${([['Full', 1], ['Half', 0.5], ['Low', 0.25], ['Out', 0]] as const).map(([l, x]) => html`<button class="btn alt grow" data-a="level" data-v="${x}">${l}</button>`)}</div>
+      ? html`<div class="row wrap">${([['Full', 1], ['¾', 0.75], ['Half', 0.5], ['Low', 0.25], ['Out', 0]] as const).map(([l, x]) => html`<button class="btn alt grow" data-a="level" data-v="${x}" aria-label="${x === 0.75 ? 'Three quarters' : l}">${l}</button>`)}</div>
         <div class="row wrap" style="margin-top:12px"><button class="btn alt grow" data-a="pack">+1 bought</button>
           ${sh.exact ? '' : html`<button class="linkbtn grow" data-a="exactOpen">Set exact count</button>`}</div>
         <label class="field" for="f-buyCost">Cost when buying (optional, ${currencySymbol(st.currency)})</label>
