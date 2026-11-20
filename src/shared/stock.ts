@@ -17,7 +17,7 @@ export function levelParts(stock: number): { open: number; sealed: number } {
 }
 
 /** Name of an open container's level. */
-export const levelName = (n: number): string => (n >= 1 ? 'full' : n >= 0.5 ? 'half' : n > 0 ? 'low' : 'out');
+export const levelName = (n: number): string => (n >= 1 ? 'full' : n >= 0.75 ? 'three quarters' : n >= 0.5 ? 'half' : n > 0 ? 'low' : 'out');
 
 /** "half +1": the open level plus how many sealed spares. */
 export const levelLabel = (stock: number): string => {

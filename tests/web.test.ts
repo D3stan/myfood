@@ -833,6 +833,23 @@ describe('deals UI', () => {
     expect(stores).toContain('data-c="toggleStore"');
     expect(stores).toContain('boom');
     expect(stores).toContain('data-f="dealRadius"');
+    expect(stores).toContain('id="deal-map"');
+    expect(stores).toContain('data-a="useMyLocation"');
+    expect(stores).not.toContain('id="deal-lat"');
+  });
+
+  test('useMyLocation fills the draft point from geolocation', () => {
+    const s = singletonStore, spy = vi.spyOn(Idiomorph, 'morph').mockImplementation(() => []);
+    vi.stubGlobal('window', { setTimeout: () => 0 });
+    vi.stubGlobal('document', {
+      getElementById: () => ({ classList: { toggle() {} }, setAttribute() {}, scrollTop: 0, querySelector: () => null, focus() {} }),
+      documentElement: { classList: { toggle() {} } }, activeElement: null, querySelector: () => null, title: '',
+    });
+    vi.stubGlobal('navigator', { geolocation: { getCurrentPosition: (ok: (p: unknown) => void) => ok({ coords: { latitude: 55.676098, longitude: 12.568337 } }) } });
+    actions.useMyLocation!({} as HTMLElement);
+    expect(s.ui.f.dealLat).toBe('55.67610');
+    expect(s.ui.f.dealLng).toBe('12.56834');
+    delete s.ui.f.dealLat; delete s.ui.f.dealLng; spy.mockRestore(); vi.unstubAllGlobals();
   });
 
   test('Bought these queues a buy op with the right lines and drops the trip', async () => {

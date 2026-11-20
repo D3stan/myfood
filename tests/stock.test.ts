@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { openDb } from '../src/server/db.ts';
 import { addDays, daysUntil, isoDate, isoWeek, weekRange } from '../src/shared/dates.ts';
 import { computeDailyNutrition, eventNutrition } from '../src/shared/nutrition.ts';
-import { applyOps, computeStock, isExpiringSoon, isLow, levelParts, portionCount, shown, toLines } from '../src/shared/stock.ts';
+import { applyOps, computeStock, isExpiringSoon, isLow, levelLabel, levelParts, portionCount, shown, toLines } from '../src/shared/stock.ts';
 import { SettingsBody } from '../src/shared/types.ts';
 import { aliasKey, currencySymbol, fmtCost, fmtNum, nameKey, parseCostCents, parseNum } from '../src/shared/text.ts';
 import { AiResult } from '../src/shared/types.ts';
@@ -50,6 +50,8 @@ test('levelParts labels open contents and sealed spares', () => {
 test('level labels report the open amount and spare count', () => {
   const garlic = { ...fixture.items[6]!, emoji: '🧄', name: 'Garlic', stock: 1.5 };
   expect(levelName(levelParts(1.5).open)).toBe('half');
+  expect(levelName(0.75)).toBe('three quarters');
+  expect(levelLabel(1.75)).toBe('three quarters +1');
   expect(amount(garlic, 1.5)).toBe('half +1');
   expect(levelReadLabel(garlic, 1.5)).toBe('🧄 Garlic: half +1');
   expect(lineText([garlic], { item_id: garlic.id, qty: 0.5, is_set: true, level_sealed_before: 1 }, 'eat')).toBe('🧄 Garlic: half +1');

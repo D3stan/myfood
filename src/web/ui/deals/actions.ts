@@ -35,6 +35,13 @@ export const dealsActions: Record<string, (el: HTMLElement) => void | Promise<un
   toggleStore: async el => {
     if (await mutate('PUT', `/api/deals/stores/${el.dataset.id}`, { enabled: (el as HTMLInputElement).checked })) await Promise.all([loadStores(), loadDeals()]);
   },
+  useMyLocation: () => {
+    if (!navigator.geolocation) return void toast("This device can't share its location");
+    navigator.geolocation.getCurrentPosition(
+      p => { s.ui.f.dealLat = p.coords.latitude.toFixed(5); s.ui.f.dealLng = p.coords.longitude.toFixed(5); commit(); },
+      () => toast("Couldn't get your location"),
+    );
+  },
   saveDealLocation: async () => {
     const f = s.ui.f, d = s.ui.dealsInfo;
     const lat = Number(f.dealLat ?? d?.lat), lng = Number(f.dealLng ?? d?.lng), radius_m = Number(f.dealRadius ?? d?.radius_m);

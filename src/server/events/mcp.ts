@@ -93,7 +93,7 @@ export function registerEventTools(server: McpServer, { db, now, defaultUserId, 
       inputSchema: {
         user_id: z.number().int().positive().optional().describe('User ID (optional only when household has 1 user)'),
         kind: Kind.describe('Event kind: buy, eat, or adjust'),
-        lines: z.array(McpLineIn).min(1).max(60).describe('Lines to log, each with item_id or item (name); qty >= 0. For level items, buy qty is containers bought (usually 1), eat qty is the remaining level of the open container (1, 0.5, 0.25, or 0), and adjust qty is the exact total container count.'),
+        lines: z.array(McpLineIn).min(1).max(60).describe('Lines to log, each with item_id or item (name); qty >= 0. For level items, buy qty is containers bought (usually 1), eat qty is the remaining level of the open container (1, 0.75, 0.5, 0.25, or 0), and adjust qty is the exact total container count.'),
         cost_cents: EventBody.shape.cost_cents.describe('Total event cost in minor currency units'),
         expires_at: z.string().regex(ISO_DATE_RE, 'Expected YYYY-MM-DD').nullish().describe('Default expiry YYYY-MM-DD applied to bought lines lacking per-line expires_at'),
         note: EventBody.shape.note.describe('Optional event note'),

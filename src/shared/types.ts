@@ -26,7 +26,7 @@ export const OWNER_SCOPES = ['shared', 'mine'] as const;
 export type OwnerScope = (typeof OWNER_SCOPES)[number];
 
 /** Stock levels for `level` items, shown as full / half / low / out. */
-export const LEVELS = [1, 0.5, 0.25, 0] as const;
+export const LEVELS = [1, 0.75, 0.5, 0.25, 0] as const;
 
 const qty = z.number().finite().gt(0).lte(100_000);
 const amount = z.number().finite().gte(0).lte(100_000);

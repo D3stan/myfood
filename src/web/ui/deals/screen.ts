@@ -44,10 +44,9 @@ export function storesPage({ ui }: V) {
     </div>
     <div class="card">
       <h2 style="margin-top:0">Location</h2>
-      <label class="field" for="deal-lat">Latitude</label>
-      <input id="deal-lat" type="text" inputmode="decimal" data-f="dealLat" value="${ui.f.dealLat ?? d.lat}" autocomplete="off">
-      <label class="field" for="deal-lng">Longitude</label>
-      <input id="deal-lng" type="text" inputmode="decimal" data-f="dealLng" value="${ui.f.dealLng ?? d.lng}" autocomplete="off">
+      <button id="deal-locate" class="btn alt" data-a="useMyLocation">📍 Use my location</button>
+      <div id="deal-map" style="height:240px;width:100%;margin:8px 0"></div>
+      <p class="small muted" id="deal-readout" style="margin:0">${Number(ui.f.dealLat ?? d.lat).toFixed(5)}, ${Number(ui.f.dealLng ?? d.lng).toFixed(5)}</p>
       <label class="field" for="deal-radius">Radius (metres)</label>
       <input id="deal-radius" type="text" inputmode="numeric" data-f="dealRadius" value="${ui.f.dealRadius ?? d.radius_m}" autocomplete="off">
       <div class="row" style="margin-top:12px"><button id="deal-loc-save" class="btn right" data-a="saveDealLocation" ${off}>Save</button></div>
