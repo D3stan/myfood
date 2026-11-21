@@ -2,7 +2,7 @@ import { addDays, isoDate, isoWeek } from '../../shared/dates.ts';
 import { levelParts, nextStock, shown, toLines } from '../../shared/stock.ts';
 import type { EventBody, EventLine, EventPatch, FoodEvent, ItemPrice, Source, Unit } from '../../shared/types.ts';
 import type { Db } from '../db.ts';
-import { all, bumpRev, get, run, transaction } from '../db.ts';
+import { all, bumpRev, get, jollyId, run, transaction } from '../db.ts';
 import { allStock, fail, unitOf } from '../domain.ts';
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;
@@ -266,7 +266,7 @@ export function createEvent(
     if (get(db, 'SELECT 1 FROM events WHERE cid = ?', body.cid)) {
       return { prevStocks, seq: null };
     }
-    const lines = toLines(body, id => unitOf(db, id));
+    const lines = toLines(body, id => unitOf(db, id, body.kind));
     if (!lines.length) noLines();
     const at = Math.min(body.at, now);
     const costCents = body.cost_cents !== undefined ? body.cost_cents : sumLineCosts(lines);
@@ -314,12 +314,16 @@ export function editEvent(db: Db, cid: string, body: EventPatch): Map<number, nu
     if (!ev) fail(404, 'No such event');
     const previousLines = all<{ item_id: number; is_set: number }>(db, 'SELECT item_id, is_set FROM event_lines WHERE event_cid = ?', cid);
     const previousByItem = new Map(previousLines.map(l => [l.item_id, !!l.is_set]));
-    const lines = toLines({ kind: ev.kind, lines: body.lines }, id => unitOf(db, id));
+    const lines = toLines({ kind: ev.kind, lines: body.lines }, id => unitOf(db, id, ev.kind));
     // Older level purchases were stored as absolute set lines. Preserve that meaning if edited.
     if (ev.kind === 'buy') for (const line of lines) {
       if (unitOf(db, line.item_id) === 'level' && previousByItem.get(line.item_id)) line.is_set = true;
     }
     if (!lines.length) noLines();
+    // An eat-out line edited without its estimate keeps the old one: the jolly has no rates to fall back on.
+    const jolly = jollyId(db);
+    const oldJolly = get<Pick<EventLine, 'kcal' | 'protein_g' | 'fat_g' | 'carbs_g'>>(db, 'SELECT kcal, protein_g, fat_g, carbs_g FROM event_lines WHERE event_cid = ? AND item_id = ?', cid, jolly);
+    if (oldJolly) for (const l of lines) if (l.item_id === jolly && l.kcal == null) for (const k of ['kcal', 'protein_g', 'fat_g', 'carbs_g'] as const) if (oldJolly[k] != null) l[k] = oldJolly[k];
 
     const lineCost = sumLineCosts(lines);
     const nextCost = body.cost_cents !== undefined ? body.cost_cents : (lineCost !== null ? lineCost : ev.cost_cents);

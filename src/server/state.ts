@@ -3,7 +3,7 @@ import { CATEGORIES } from '../shared/types.ts';
 import type { ExpenseLock, Item, Job, JobMode, Me, State, Unit, User } from '../shared/types.ts';
 import { listApiTokens } from './auth.ts';
 import type { Db } from './db.ts';
-import { all, get, getMeta, getRev } from './db.ts';
+import { all, get, getMeta, getRev, jollyId } from './db.ts';
 import { allStock } from './domain.ts';
 import { annotateLevelReadings, mapEvents } from './events/repo.ts';
 import type { EventRow } from './events/repo.ts';
@@ -168,6 +168,7 @@ export function buildState(db: Db, userId: number, env: StateEnv): State {
     me,
     users: all<User>(db, 'SELECT id, name, emoji FROM users ORDER BY id'),
     items,
+    jolly_id: jollyId(db),
     presets: listPresets(db, userId),
     usual,
     events,

@@ -62,7 +62,9 @@ export function history({ st, ui }: V, now: Date | number = new Date()) {
           <button class="ev ${e.kind}" id="ev-${e.cid}" data-a="open" data-s="event" data-id="${e.cid}">
             <span class="who">${userOf(st, e)?.emoji ?? '🙂'}</span>
             <span class="grow">
-              ${e.lines.some(l => e.kind === 'eat' && l.is_set && st.items.find(i => i.id === l.item_id)?.unit === 'level')
+              ${e.lines.some(l => l.item_id === st.jolly_id)
+                ? html`<b>🃏 Eat out</b> ${e.note ? `· ${e.note} ` : ''}· ~${fmtNum(Math.round(e.lines.reduce((a, l) => a + (l.kcal ?? 0), 0)))} kcal <span class="tag">estimate</span>`
+                : e.lines.some(l => e.kind === 'eat' && l.is_set && st.items.find(i => i.id === l.item_id)?.unit === 'level')
                 ? e.lines.map(l => {
                   const levelReading = l.is_set && st.items.find(i => i.id === l.item_id)?.unit === 'level';
                   return `${levelReading ? 'set' : 'ate'} ${lineText(st.items, l, e.kind)}`;
@@ -70,7 +72,7 @@ export function history({ st, ui }: V, now: Date | number = new Date()) {
                 : html`<b>${VERB[e.kind]}</b> ${e.lines.map(l => lineText(st.items, l, e.kind)).join(', ')}`}
               ${e.source === 'cook' ? html` <span class="tag">cooked</span>` : ''}
               ${e.cost_cents != null && e.cost_cents > 0 ? html` <span class="tag">${fmtCost(e.cost_cents, st.currency)}</span>` : ''}
-              ${e.note ? html`<span class="small muted clip">${e.note}</span>` : ''}
+              ${e.note && !e.lines.some(l => l.item_id === st.jolly_id) ? html`<span class="small muted clip">${e.note}</span>` : ''}
             </span>
             <span class="t">${clock(e.at)}</span>
           </button>

@@ -2,9 +2,9 @@ import { daysUntil } from '../../shared/dates.ts';
 import { isLow, portionCount, shown } from '../../shared/stock.ts';
 import { aliasKey, nameKey } from '../../shared/text.ts';
 import { CATEGORIES } from '../../shared/types.ts';
-import type { DataInfo, Item, ItemBody, ItemPatch, Unit } from '../../shared/types.ts';
+import type { DataInfo, Item, ItemBody, ItemPatch, Kind, Unit } from '../../shared/types.ts';
 import type { Db } from '../db.ts';
-import { all, bumpRev, get, run, transaction } from '../db.ts';
+import { JOLLY_KEY, all, bumpRev, get, run, transaction } from '../db.ts';
 import { allStock, fail, unitOf } from '../domain.ts';
 
 export const clash = (name: string): never => fail(409, `There is already an item called ${name}`);
@@ -190,7 +190,7 @@ export function deleteAlias(db: Db, text: string): { key: string; changes: numbe
 export function listData(db: Db): DataInfo {
   return {
     aliases: all<DataInfo['aliases'][number]>(db, 'SELECT a.text, a.item_id, i.name AS item_name, i.emoji FROM aliases a JOIN items i ON i.id = a.item_id ORDER BY i.name, a.text'),
-    archived: all<DataInfo['archived'][number]>(db, 'SELECT id, name, emoji, archived_at FROM items WHERE archived_at IS NOT NULL ORDER BY archived_at DESC'),
+    archived: all<DataInfo['archived'][number]>(db, 'SELECT id, name, emoji, archived_at FROM items WHERE archived_at IS NOT NULL AND name_key <> ? ORDER BY archived_at DESC', JOLLY_KEY),
   };
 }
 
@@ -310,12 +310,12 @@ export function getHydratedItemById(db: Db, itemId: number, nowMs: number, inclu
   return toHydratedItem(row, allStock(db), loadRecipeMap(db), nowMs, includeArchived);
 }
 
-export function requireActiveItems(db: Db, itemIds: number[]): void {
+export function requireActiveItems(db: Db, itemIds: number[], kind?: Kind): void {
   const seen = new Set<number>();
   for (const id of itemIds) {
     if (seen.has(id)) continue;
     seen.add(id);
-    if (!unitOf(db, id)) {
+    if (!unitOf(db, id, kind)) {
       fail(400, `Item ${id} does not exist or is archived`);
     }
   }

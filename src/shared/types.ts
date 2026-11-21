@@ -100,6 +100,16 @@ export const AiCook = z.object({
 });
 export type AiCook = z.infer<typeof AiCook>;
 
+/** Food eaten away from the pantry, with an estimate. The server clamps the numbers (kcal 0-5000, macros 0-1000). */
+export const AiEatOut = z.object({
+  note: z.string().trim().min(1).max(80),
+  kcal: amount,
+  protein_g: amount.nullable(),
+  fat_g: amount.nullable(),
+  carbs_g: amount.nullable(),
+});
+export type AiEatOut = z.infer<typeof AiEatOut>;
+
 export const AiResult = z.object({
   /** One short sentence for the user. */
   reply: z.string().max(300),
@@ -107,6 +117,8 @@ export const AiResult = z.object({
   events: z.array(AiEvent).max(6),
   /** Optional cooked-meal batches parsed from the message. */
   cook: z.array(AiCook).max(3).optional(),
+  /** Optional restaurant/takeaway meals: counted in nutrition, no pantry item. */
+  eat_out: z.array(AiEatOut).max(6).optional(),
 });
 export type AiResult = z.infer<typeof AiResult>;
 
@@ -366,6 +378,8 @@ export interface State {
   users: User[];
   /** Not archived, sorted by category then name. */
   items: Item[];
+  /** The hidden archived item that eat-out lines point at. Never in `items`. */
+  jolly_id: number;
   /** The signed-in user's presets. */
   presets: Preset[];
   /** item id -> the amount this user took last time. Missing = use item.step. */
@@ -406,6 +420,11 @@ export const LineIn = z.object({
   qty: amount,
   cost_cents: cents.nullish(),
   expires_at: isoDateStr.nullish(),
+  /** Overrides the item's nutrition for this line (eat-out lines carry their estimate here). */
+  kcal: z.number().finite().gte(0).lte(5000).nullish(),
+  protein_g: z.number().finite().gte(0).lte(1000).nullish(),
+  fat_g: z.number().finite().gte(0).lte(1000).nullish(),
+  carbs_g: z.number().finite().gte(0).lte(1000).nullish(),
 });
 export type LineIn = z.infer<typeof LineIn>;
 
@@ -482,6 +501,7 @@ export type SettingsBody = z.infer<typeof SettingsBody>;
 export const ApplyBody = z.object({
   events: z.array(AiEvent).max(6),
   cook: z.array(AiCook).max(3).optional(),
+  eat_out: z.array(AiEatOut).max(6).optional(),
 });
 export type ApplyBody = z.infer<typeof ApplyBody>;
 

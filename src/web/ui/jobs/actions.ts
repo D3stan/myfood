@@ -1,6 +1,7 @@
 import { api, startJob } from '../../api.ts';
 import { closeSheet, openSheet, receive, store as s } from '../../store.ts';
 import { afterState, commit, fail, mutate, sheet, toast } from '../helpers.ts';
+import { parseNum } from '../../../shared/text.ts';
 import { parseOptNum } from '../logging.ts';
 
 function shrink(file: File): Promise<Blob> {
@@ -61,12 +62,19 @@ export const jobActions: Record<string, (el: HTMLElement) => void | Promise<unkn
     const sh = sheet();
     sh.cook?.splice(Number(el.dataset.k), 1);
   },
+  rmEatOut: el => { sheet().eatOut?.splice(Number(el.dataset.k), 1); },
+  eoKcal: el => {
+    const o = sheet().eatOut?.[Number(el.dataset.k)], n = parseNum((el as HTMLInputElement).value);
+    if (!o) return;
+    if (Number.isNaN(n) || n < 0 || n > 5000) toast('kcal must be 0 to 5000');
+    else o.kcal = n;
+  },
   apply: async () => {
     const sh = sheet();
     if (sh.busy) return;
     const events = structuredClone((sh.events ?? []).filter(e => e.lines.length));
-    const cook = sh.cook ?? [];
-    if (!events.length && !cook.length) return void toast('Nothing left to add');
+    const cook = sh.cook ?? [], eat_out = sh.eatOut ?? [];
+    if (!events.length && !cook.length && !eat_out.length) return void toast('Nothing left to add');
     if (events.length && s.ui.f.reviewTotalCost !== undefined) {
       const tc = parseOptNum(s.ui.f.reviewTotalCost);
       if (tc === 'invalid' || (tc != null && tc < 0)) return void toast('Check the total cost');
@@ -75,7 +83,7 @@ export const jobActions: Record<string, (el: HTMLElement) => void | Promise<unkn
     }
     sh.busy = true; commit();
     try {
-      receive(s, await api('POST', `/api/jobs/${sh.id}/apply`, { events, ...(cook.length ? { cook } : {}) }));
+      receive(s, await api('POST', `/api/jobs/${sh.id}/apply`, { events, ...(cook.length ? { cook } : {}), ...(eat_out.length ? { eat_out } : {}) }));
       s.ui.f.reviewTotalCost = '';
       toast('Applied to pantry');
       afterState();

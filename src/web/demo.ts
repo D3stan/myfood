@@ -455,6 +455,13 @@ export function createDemoState(now = Date.now()): State {
     );
   }
 
+  // An eat-out estimate (jolly line: not a pantry item).
+  events.push({
+    cid: 'demo-ev-eat-out-1', user_id: 1, at: localDayAt(-1, 20, 10), kind: 'eat', source: 'manual',
+    note: "Pizza margherita, Gino's", preset_id: null, cost_cents: null, counts_nutrition: true,
+    lines: [{ item_id: 999, qty: -1, is_set: false, kcal: 850, protein_g: 32, fat_g: 30, carbs_g: 105, value_cents: 0 }],
+  });
+
   // A cooked meal batch 2 days ago (always inside the 90-day window).
   events.push({
     cid: 'demo-ev-cook-1',
@@ -589,6 +596,7 @@ export function createDemoState(now = Date.now()): State {
     },
     users,
     items,
+    jolly_id: 999,
     presets,
     usual: {
       [ID.eggs]: 3,
@@ -902,7 +910,7 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
         const it = st.items.find(i => i.id === l.item_id);
         if (it && !l.is_set) it.stock = round(it.stock - l.qty);
       }
-      const nextLines = toLines({ kind: ev.kind, lines: patch.lines }, id => st.items.find(i => i.id === id)?.unit);
+      const nextLines = toLines({ kind: ev.kind, lines: patch.lines }, id => (id === st.jolly_id ? 'portion' : st.items.find(i => i.id === id)?.unit));
       for (const l of nextLines) {
         const it = st.items.find(i => i.id === l.item_id);
         if (it) it.stock = nextStock(it.stock, l, ev.kind);
@@ -1121,6 +1129,14 @@ export function createDemoApi(initial: State = createDemoState()): (method: stri
           cost_cents,
           counts_nutrition: true,
           lines: snapshotLines(mappedLines, st.items, true),
+        });
+      }
+
+      for (const o of b.eat_out ?? []) {
+        st.events.unshift({
+          cid: `demo-eatout-${crypto.randomUUID().slice(0, 8)}`, user_id: st.me.id, at: nowMs, kind: 'eat', source,
+          note: o.note, preset_id: null, cost_cents: null, counts_nutrition: true,
+          lines: [{ item_id: st.jolly_id, qty: -1, is_set: false, kcal: o.kcal, protein_g: o.protein_g, fat_g: o.fat_g, carbs_g: o.carbs_g, value_cents: 0 }],
         });
       }
 

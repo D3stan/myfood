@@ -89,7 +89,7 @@ export function registerEventTools(server: McpServer, { db, now, defaultUserId, 
     'log_event',
     {
       title: 'Log Pantry Event',
-      description: 'Log a buy, eat, or adjust stock event (with optional cost_cents, expires_at, note) preserving nutrition snapshots and weekly expense locks.',
+      description: 'Log a buy, eat, or adjust stock event (with optional cost_cents, expires_at, note) preserving nutrition snapshots and weekly expense locks. For restaurant/takeaway food use log_eat_out instead.',
       inputSchema: {
         user_id: z.number().int().positive().optional().describe('User ID (optional only when household has 1 user)'),
         kind: Kind.describe('Event kind: buy, eat, or adjust'),
@@ -156,7 +156,7 @@ export function registerEventTools(server: McpServer, { db, now, defaultUserId, 
     'edit_event',
     {
       title: 'Edit Event',
-      description: 'Replace lines, cost_cents, or note of an active event (enforces weekly expense locks and updates nutrition snapshots). Level purchases add containers, level eats set the open container level, and level adjustments set the exact total; older absolute level purchase events retain their original meaning when edited.',
+      description: 'Replace lines, cost_cents, or note of an active event (an eat-out line is the hidden Eat out item: resend its kcal/protein_g/fat_g/carbs_g or they are lost; enforces weekly expense locks and updates nutrition snapshots). Level purchases add containers, level eats set the open container level, and level adjustments set the exact total; older absolute level purchase events retain their original meaning when edited.',
       inputSchema: {
         cid: z.string().trim().min(1).max(64).describe('Event cid to edit'),
         lines: z.array(McpLineIn).min(1).max(60).describe('Replacement lines, each with item_id or item (name). For level items, buy qty adds containers, eat qty sets the open container level, and adjust qty sets the exact total count.'),
@@ -166,9 +166,9 @@ export function registerEventTools(server: McpServer, { db, now, defaultUserId, 
       annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
     },
     (args) => runTool(async () => {
-      const owner = get<{ user_id: number }>(db, 'SELECT user_id FROM events WHERE cid = ?', args.cid);
+      const owner = get<{ user_id: number; kind: Kind }>(db, 'SELECT user_id, kind FROM events WHERE cid = ?', args.cid);
       const lines = resolveLines(db, 'lines', args.lines, owner?.user_id ?? null);
-      requireActiveItems(db, lines.map(l => l.item_id));
+      requireActiveItems(db, lines.map(l => l.item_id), owner?.kind); // lets an eat-out keep its hidden jolly line
       const patch = EventPatch.parse(
         stripUndefined({
           lines,

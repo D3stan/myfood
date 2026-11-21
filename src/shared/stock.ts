@@ -53,6 +53,7 @@ export function toLines(body: Pick<EventBody, 'kind' | 'lines'>, unitOf: (itemId
       : { item_id: l.item_id, qty: body.kind === 'buy' ? l.qty : -l.qty, is_set: false };
     if (l.cost_cents != null) line.cost_cents = l.cost_cents;
     if (l.expires_at != null) line.expires_at = l.expires_at;
+    if (!line.is_set) for (const k of ['kcal', 'protein_g', 'fat_g', 'carbs_g'] as const) if (l[k] != null) line[k] = l[k];
     out.push(line);
   }
   return out;
@@ -101,9 +102,10 @@ export function applyOps(server: State, ops: PendingOp[]): State {
     }
     const b = op.body;
     if (events.some(e => e.cid === b.cid)) continue;
-    const lines = toLines(b, id => byId.get(id)?.unit);
+    const lines = toLines(b, id => byId.get(id)?.unit ?? (id === server.jolly_id ? 'portion' : undefined));
     for (const l of lines) {
-      const it = byId.get(l.item_id)!;
+      const it = byId.get(l.item_id);
+      if (!it) { l.value_cents = 0; continue; } // the jolly (eat out) is not in items: no stock, nothing unpriced
       it.stock = nextStock(it.stock, l, b.kind);
       if (b.kind === 'eat' && !l.is_set) {
         usual[l.item_id] = -l.qty;

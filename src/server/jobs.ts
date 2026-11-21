@@ -9,6 +9,7 @@ import type {
   AiContext,
   AiContextItem,
   AiCook,
+  AiEatOut,
   AiEvent,
   AiInput,
   AiLine,
@@ -20,7 +21,7 @@ import type {
   Unit,
 } from '../shared/types.ts';
 import type { Db } from './db.ts';
-import { all, bumpRev, get, run, transaction } from './db.ts';
+import { all, bumpRev, get, jollyId, run, transaction } from './db.ts';
 import { applyCookBatch } from './cooking/repo.ts';
 import { allStock, fail, unitOf } from './domain.ts';
 import { applyPurchasedLineMeta, assertPeriodUnlocked, insertEvent } from './events/repo.ts';
@@ -65,6 +66,7 @@ interface ItemMetaRow {
 const MAX_UNFINISHED = 3;
 const RESTARTED = 'The server restarted, please try again.';
 const roundQty = (n: number): number => Math.round(n * 1000) / 1000;
+const clamp = (n: number | null, max: number): number | null => (n === null ? null : Math.min(max, Math.max(0, n)));
 
 /** "2026-11-15 08:10 Sunday" in the server's time zone. */
 export function localNow(ms: number): string {
@@ -215,6 +217,7 @@ function applyProposalToDb(
   userId: number,
   events: AiEvent[],
   cook: AiCook[],
+  eatOut: AiEatOut[],
   opts: ApplyOpts,
 ): { eventCids: string[]; prevStocks: Map<number, number>; at: number } {
   const at = opts.nowMs;
@@ -242,7 +245,7 @@ function applyProposalToDb(
         metaList.push({ itemId, prevStock: prevStocks.get(itemId) ?? 0, expiresAt, expiresInDays: expDays });
       }
 
-      const stored = toLines({ kind: ev.kind, lines: lineInputs }, (id) => unitOf(db, id)).filter((l) => l.is_set || l.qty !== 0);
+      const stored = toLines({ kind: ev.kind, lines: lineInputs }, (id) => unitOf(db, id, ev.kind)).filter((l) => l.is_set || l.qty !== 0);
       if (!stored.length) return;
 
       const lineCostSum = stored.some((l) => l.cost_cents != null)
@@ -308,6 +311,34 @@ function applyProposalToDb(
       eventCids.push(...res.eventCids);
     });
 
+    // Each eat-out is one `eat` event on the hidden jolly item; the line carries the estimate (kcal 0-5000, macros 0-1000).
+    eatOut.forEach((e, idx) => {
+      const cid = `${opts.cidPrefix}-eatout-${idx}`;
+      insertEvent(db, {
+        cid,
+        userId,
+        at,
+        kind: 'eat',
+        source: opts.source,
+        note: e.note,
+        presetId: null,
+        jobId: opts.jobId,
+        costCents: null,
+        countsNutrition: true,
+        lines: [{
+          item_id: jollyId(db),
+          qty: -1,
+          is_set: false,
+          kcal: clamp(e.kcal, 5000)!,
+          protein_g: clamp(e.protein_g, 1000),
+          fat_g: clamp(e.fat_g, 1000),
+          carbs_g: clamp(e.carbs_g, 1000),
+          value_cents: 0,
+        }],
+      });
+      eventCids.push(cid);
+    });
+
     opts.afterTx?.(eventCids, at);
     bumpRev(db);
     return { eventCids, prevStocks, at };
@@ -341,9 +372,9 @@ export function createJobs(deps: JobsDeps) {
   for (const j of stuck) failJob(j.id, RESTARTED);
 
   /** One transaction: items, events, cook batches, aliases, job status. */
-  function applyEvents(job: JobRow, events: AiEvent[], cook: AiCook[], result: AiResult | null): { prevStocks: Map<number, number>; at: number } {
+  function applyEvents(job: JobRow, events: AiEvent[], cook: AiCook[], eatOut: AiEatOut[], result: AiResult | null): { prevStocks: Map<number, number>; at: number } {
     const hasImages = JSON.parse(job.images).length > 0;
-    const { prevStocks, at } = applyProposalToDb(db, job.user_id, events, cook, {
+    const { prevStocks, at } = applyProposalToDb(db, job.user_id, events, cook, eatOut, {
       cidPrefix: `job-${job.id}`,
       source: jobSource(job.mode, hasImages),
       note: job.text.trim().slice(0, 200) || null,
@@ -392,6 +423,7 @@ export function createJobs(deps: JobsDeps) {
       if (!parsed.success) return failJob(id, 'The AI gave an answer the app could not read. Please try again.');
       let events: AiEvent[];
       const cook = parsed.data.cook ?? [];
+      const eatOut = parsed.data.eat_out ?? [];
       try { events = validateProposal(db, job.user_id, parsed.data.events, cook); }
       catch (e) { return failJob(id, `The AI gave an answer that does not fit the pantry: ${(e as Error).message}`); }
       const result: AiResult = { ...parsed.data, events };
@@ -401,7 +433,7 @@ export function createJobs(deps: JobsDeps) {
           bumpRev(db);
         });
       } else {
-        const { prevStocks, at } = applyEvents(job, events, cook, result);
+        const { prevStocks, at } = applyEvents(job, events, cook, eatOut, result);
         await notifyLowCrossings(db, prevStocks, sendPush, at).catch((e) => console.error('push', e));
       }
     } catch (e) {
@@ -450,12 +482,12 @@ export function createJobs(deps: JobsDeps) {
     },
 
     /** A job that is not in review is left alone: a double tap must not apply twice. */
-    apply(userId: number, id: number, events: AiEvent[], cook: AiCook[] = []): void {
+    apply(userId: number, id: number, events: AiEvent[], cook: AiCook[] = [], eatOut: AiEatOut[] = []): void {
       const job = row(id);
       if (!job || job.user_id !== userId || job.dismissed_at) fail(404, 'No such job');
       if (job!.status !== 'review') return;
       const checked = validateProposal(db, userId, events, cook);
-      const { prevStocks, at } = applyEvents(job!, checked, cook, null);
+      const { prevStocks, at } = applyEvents(job!, checked, cook, eatOut, null);
       void notifyLowCrossings(db, prevStocks, sendPush, at).catch((e) => console.error('push', e));
     },
 
@@ -497,7 +529,7 @@ export async function runShortcutAi(
     const cook = parsed.data.cook ?? [];
     const events = validateProposal(db, userId, parsed.data.events, cook);
 
-    const { eventCids, prevStocks, at } = applyProposalToDb(db, userId, events, cook, {
+    const { eventCids, prevStocks, at } = applyProposalToDb(db, userId, events, cook, parsed.data.eat_out ?? [], {
       cidPrefix: `sc-${nowMs}-${randomBytes(4).toString('hex')}`,
       source: 'shortcut',
       note: trimmed.slice(0, 200),

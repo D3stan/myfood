@@ -8,7 +8,7 @@ import { barcodeSheet } from './components/barcode.ts';
 import { composeSheet, reviewSheet } from './components/compose.ts';
 import { cookSheet } from './components/cook.ts';
 import { composer, tabbar, toast } from './components/nav.ts';
-import { eventSheet, expenseSheet, itemFormSheet, itemSheet, presetEditSheet, presetSheet } from './components/sheets.ts';
+import { eatOutSheet, eventSheet, expenseSheet, itemFormSheet, itemSheet, presetEditSheet, presetSheet } from './components/sheets.ts';
 import { syncTour, tourHtml } from './components/tour.ts';
 import { history } from './screens/history.ts';
 import { login } from './screens/login.ts';
@@ -51,7 +51,7 @@ export function sheetHtml(s: Store): string {
   const body = {
     item: itemSheet, preset: presetSheet, presetEdit: presetEditSheet, itemForm: itemFormSheet,
     compose: composeSheet, review: reviewSheet, event: eventSheet,
-    cook: cookSheet, barcode: barcodeSheet, expense: expenseSheet,
+    cook: cookSheet, barcode: barcodeSheet, expense: expenseSheet, eatOut: eatOutSheet,
   }[sh.t];
   return htmlToString(body(v, sh));
 }
