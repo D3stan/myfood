@@ -65,3 +65,21 @@ jobs:
       - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           fail-on-severity: high
+
+  # Only runs after check+docker pass on main. Turn off Dokploy's own auto-deploy,
+  # otherwise every push deploys twice and CI no longer gates the deploy.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [check, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Trigger Dokploy deploy webhook
+        env:
+          DOKPLOY_WEBHOOK_URL: ${{ secrets.DOKPLOY_WEBHOOK_URL }}
+        run: |
+          curl -fsS --retry 3 -X POST "$DOKPLOY_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -H 'X-GitHub-Event: push' \
+            -d '{"ref":"refs/heads/main"}'
