@@ -32,6 +32,17 @@ describe('Spend frames', () => {
     expect(out.match(/<rect/g)).toHaveLength(2);
     expect(out).not.toContain('id="exp-old"');
   });
+  test('day: that day only, no chart', () => {
+    const s = newStore(structuredClone(fixture));
+    s.server!.expenses = [exp('w1', 1, 10, 3000), exp('w2', 2, 12, 1000)];
+    s.ui.tab = 'spend';
+    s.ui.frames.spend = { frame: 'day', offset: -5 }; // Tue 10 Nov
+    const out = appHtml(s, NOW);
+    expect(out).toMatch(/id="spend-total"[^>]*>30\s?kr\./);
+    expect(out).toContain('id="exp-w1"');
+    expect(out).not.toContain('id="exp-w2"');
+    expect(out).not.toContain('<svg class="chart"');
+  });
   test('month: one bar per day, includes earlier weeks of the month and lists their cards', () => {
     const out = page({ frame: 'month' });
     expect(out).toMatch(/id="spend-total"[^>]*>90\s?kr\./);

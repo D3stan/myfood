@@ -1,8 +1,10 @@
 // Time frames for the Me trend and Spend. Pure; day strings come from isoDate (rule 3).
 import { MONTHS, addDays, isoDate, isoWeek, weekRange } from './dates.ts';
 
-export type Frame = 'week' | 'month' | 'year';
+export type Frame = 'day' | 'week' | 'month' | 'year';
 export interface Period { from: string; to: string; label: string; days: string[] }
+
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /** State holds this many days of nutrition and expenses; older periods are partial or absent. */
 export const WINDOW_DAYS = 90;
@@ -11,6 +13,10 @@ export const WINDOW_DAYS = 90;
 export function periodRange(frame: Frame, offset: number, now: number | Date): Period {
   const t = now instanceof Date ? now : new Date(now);
   const y = t.getFullYear(), m = t.getMonth(), d = t.getDate();
+  if (frame === 'day') {
+    const day = new Date(y, m, d + offset);
+    return { from: isoDate(day), to: isoDate(day), label: `${DOW[day.getDay()]} ${day.getDate()} ${MONTHS[day.getMonth()]}`, days: [isoDate(day)] };
+  }
   if (frame === 'week') {
     const mon = new Date(y, m, d - ((t.getDay() + 6) % 7) + 7 * offset);
     const days = Array.from({ length: 7 }, (_, i) => isoDate(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + i)));

@@ -8,7 +8,7 @@ import { loadStats } from './stats.ts';
 export const frameActions: Record<string, (el: HTMLElement) => void> = {
   frame: el => {
     const k = el.dataset.k;
-    if (k && (el.dataset.v === 'week' || el.dataset.v === 'month' || el.dataset.v === 'year')) { s.ui.frames[k] = { frame: el.dataset.v as Frame, offset: 0 }; commit(); loadStats(k, commit); }
+    if (k && (el.dataset.v === 'day' || el.dataset.v === 'week' || el.dataset.v === 'month' || el.dataset.v === 'year')) { s.ui.frames[k] = { frame: el.dataset.v as Frame, offset: 0 }; commit(); loadStats(k, commit); }
   },
   frameStep: el => {
     const k = el.dataset.k;
