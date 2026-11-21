@@ -74,6 +74,11 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
       openSheet(s, { t: 'preset', id, q: lines(p.lines) });
     } else if (d.s === 'presetEdit') {
       openSheet(s, { t: 'presetEdit', id: p?.id, q: lines(p?.lines ?? []), lines: p?.lines.map(l => l.item_id) ?? [] }, { name: p?.name ?? '', emoji: p?.emoji ?? '🍽️', time: hourToTime(p?.hour ?? 8) });
+    } else if (d.s === 'event' && e?.lines.some(l => l.item_id === v.jolly_id)) {
+      const l = e.lines[0]!, n = (x: number | null | undefined) => (x == null ? '' : String(x));
+      openSheet(s, { t: 'eatOut', id: e.cid, q: {} }, { eoNote: e.note ?? '', eoKcal: n(l.kcal), eoP: n(l.protein_g), eoF: n(l.fat_g), eoC: n(l.carbs_g) });
+    } else if (d.s === 'eatOut') {
+      openSheet(s, { t: 'eatOut', q: {} }, { eoNote: '', eoKcal: '', eoP: '', eoF: '', eoC: '' });
     } else if (d.s === 'event' && e) {
       openSheet(s, { t: 'event', id: e.cid, q: lines(e.lines.map(l => ({ item_id: l.item_id, qty: l.is_set ? l.qty : Math.abs(l.qty) }))) });
     } else if (d.s === 'compose') {
@@ -82,6 +87,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
       const job = v.jobs.find(j => j.id === id);
       const events = structuredClone(job?.result?.events ?? []);
       const cook = structuredClone(job?.result?.cook ?? []);
+      const eatOut = structuredClone(job?.result?.eat_out ?? []);
       const existingTotal = events.find(ev => ev.total_cost != null)?.total_cost;
       const lineSum = events.flatMap(ev => ev.kind === 'buy' ? ev.lines : []).reduce((acc, l) => acc + (l.price ?? 0), 0);
       const hasPrices = events.some(ev => ev.kind === 'buy' && ev.lines.some(l => l.price != null));
@@ -89,7 +95,7 @@ const core: Record<string, (el: HTMLElement) => void | Promise<unknown>> = {
         : existingTotal != null ? fmtNum(existingTotal)
         : hasPrices ? fmtNum(lineSum)
         : '';
-      openSheet(s, { t: 'review', id, q: {}, events, orig: structuredClone(events), cook, origCook: structuredClone(cook) }, { reviewTotalCost });
+      openSheet(s, { t: 'review', id, q: {}, events, orig: structuredClone(events), cook, origCook: structuredClone(cook), eatOut }, { reviewTotalCost });
     } else if (d.s === 'cook') {
       const ck = cookStateFor(it?.is_cooked ? it : undefined, v.now);
       openSheet(s, { t: 'cook', id: it?.is_cooked ? it.id : undefined, q: ck.q, lines: ck.lines }, ck.fields);

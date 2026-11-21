@@ -21,14 +21,16 @@ export function composeSheet({ ui }: V, sh: Sheet) {
     <div class="row" style="margin-top:12px">
       <label class="btn alt icon" for="photo-input" aria-label="Add photos">📷</label>
       <input id="photo-input" class="sr" type="file" accept="image/*" multiple data-c="photos">
-      <button class="btn right" data-a="send" ${ui.online && !sh.busy ? '' : 'disabled'}>${sh.busy ? 'Sending…' : 'Send'}</button></div>`;
+      <button class="btn right" data-a="send" ${ui.online && !sh.busy ? '' : 'disabled'}>${sh.busy ? 'Sending…' : 'Send'}</button></div>
+    ${isAudit ? '' : html`<button class="linkbtn muted small" data-a="open" data-s="eatOut">Ate out? Enter it by hand</button>`}`;
 }
 
 export function reviewSheet(v: V, sh: Sheet) {
   const { st, ui } = v, job = st.jobs.find(j => j.id === sh.id), events = sh.events ?? [];
   const cookBatches = sh.cook ?? job?.result?.cook ?? [];
+  const eatOuts = sh.eatOut ?? job?.result?.eat_out ?? [];
   const isAudit = job?.mode === 'audit';
-  const left = events.reduce((a, e) => a + e.lines.length, 0) + cookBatches.length;
+  const left = events.reduce((a, e) => a + e.lines.length, 0) + cookBatches.length + eatOuts.length;
   const today = isoDate(st.now);
   return html`<h2 id="sheet-title">${isAudit ? 'Fridge audit — review adjustments' : 'Receipt'}</h2>
     <p>${job?.result?.reply ?? ''}</p>
@@ -69,6 +71,12 @@ export function reviewSheet(v: V, sh: Sheet) {
         }).join(', ')}</div>` : ''}
       </div>`;
     })}` : ''}
+    ${eatOuts.length ? html`<h3>Eat out</h3>${eatOuts.map((o, oi) => html`<div class="rv" id="rve-${oi}">
+      <div class="line"><span class="emoji">🃏</span><span class="n">${o.note}</span>
+        <input type="text" inputmode="decimal" style="width:5.5rem" value="${Math.round(o.kcal)}" data-c="eoKcal" data-k="${oi}" aria-label="kcal for ${o.note}" autocomplete="off"><span class="muted small">kcal</span>
+        <button class="btn alt icon" data-a="rmEatOut" data-k="${oi}" aria-label="Remove eat out">×</button></div>
+      <div class="small muted">${[o.protein_g != null ? `${fmtNum(o.protein_g)}g P` : '', o.fat_g != null ? `${fmtNum(o.fat_g)}g F` : '', o.carbs_g != null ? `${fmtNum(o.carbs_g)}g C` : ''].filter(Boolean).join(' · ')}</div>
+    </div>`)}` : ''}
     ${!isAudit && events.length ? html`<label class="field" for="f-reviewTotalCost">Total cost (${currencySymbol(st.currency)}, optional)</label>
       <input id="f-reviewTotalCost" type="text" inputmode="decimal" placeholder="0.00" data-f="reviewTotalCost" value="${ui.f.reviewTotalCost ?? ''}" autocomplete="off">` : ''}
     ${left ? '' : html`<p class="note">Nothing left to add.</p>`}

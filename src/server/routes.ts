@@ -369,7 +369,7 @@ export function createApp(deps: Deps): Hono<Env> {
   });
   app.post('/api/jobs/:id/apply', async c => {
     const body = parse(ApplyBody, await json(c));
-    jobs.apply(c.get('uid'), id(c), body.events, body.cook);
+    jobs.apply(c.get('uid'), id(c), body.events, body.cook, body.eat_out);
     return c.json(state(c.get('uid')));
   });
   app.delete('/api/jobs/:id', c => {

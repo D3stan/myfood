@@ -2,12 +2,12 @@
 // Functions take the store as their first argument so they can be tested without a DOM.
 import { applyOps } from '../shared/stock.ts';
 import type { Frame } from '../shared/period.ts';
-import type { AiCook, AiEvent, BarcodeLookup, DataInfo, DealsInfo, DealsPlan, EventBody, ItemDeals, ItemPrice, JobMode, PendingOp, State, StatsMap } from '../shared/types.ts';
+import type { AiCook, AiEatOut, AiEvent, BarcodeLookup, DataInfo, DealsInfo, DealsPlan, EventBody, ItemDeals, ItemPrice, JobMode, PendingOp, State, StatsMap } from '../shared/types.ts';
 
 export type Tab = 'pantry' | 'spend' | 'history' | 'me';
 
 export interface Sheet {
-  t: 'item' | 'preset' | 'presetEdit' | 'itemForm' | 'compose' | 'review' | 'event' | 'cook' | 'barcode' | 'expense';
+  t: 'item' | 'preset' | 'presetEdit' | 'itemForm' | 'compose' | 'review' | 'event' | 'cook' | 'barcode' | 'expense' | 'eatOut';
   id?: number | string;
   /** Quantities being edited, keyed by item id ("main" in the item sheet). Review lines live in `events`. */
   q: Record<string, number>;
@@ -18,6 +18,8 @@ export interface Sheet {
   orig?: AiEvent[];
   cook?: AiCook[];
   origCook?: AiCook[];
+  /** review: eat-out estimates in the proposal. */
+  eatOut?: AiEatOut[];
   /** compose: job mode ('auto' | 'receipt' | 'audit'). */
   mode?: JobMode;
   /** item: true = step in portions when item has portion_g, false = step in grams. */

@@ -69,6 +69,7 @@ export const fixture: State = {
       ] },
     buyEv,
   ],
+  jolly_id: 9999,
   jobs: [
     { id: 9, mode: 'receipt', status: 'review', text: '', has_images: true, error: null, event_cids: [], created_at: now - 60_000,
       result: { reply: 'Found 3 things on the receipt.', events: [{ kind: 'buy', preset_id: null, total_cost: 92.5, lines: [

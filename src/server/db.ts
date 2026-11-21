@@ -107,6 +107,28 @@ function rebuildItemsTable(db: Db): void {
   }
 }
 
+export const JOLLY_KEY = '__jolly__';
+
+/** The hidden item every eat-out line points at. Price 0 so its lines get value_cents 0, not "unpriced". Archived, so every `archived_at IS NULL` query skips it; nameKey() never yields this key. */
+export function ensureJolly(db: Db): void {
+  if (get(db, 'SELECT 1 FROM items WHERE name_key = ?', JOLLY_KEY)) return;
+  const now = Date.now();
+  run(
+    db,
+    `INSERT INTO items(name, name_key, emoji, category, unit, step, pack_size, owner_id, cost_per_unit_cents, archived_at, created_at)
+     VALUES ('Eat out', ?, '🃏', 'other', 'portion', 1, 1, NULL, 0, ?, ?)`,
+    JOLLY_KEY,
+    now,
+    now,
+  );
+}
+
+/** Id of the jolly, creating it on first use (not in openDb: that would take id 1 on a fresh database). */
+export function jollyId(db: Db): number {
+  ensureJolly(db);
+  return get<{ id: number }>(db, 'SELECT id FROM items WHERE name_key = ?', JOLLY_KEY)!.id;
+}
+
 /** Idempotently upgrades v1 databases (and ensures v2 indexes on fresh ones). */
 export function migrate(db: Db): void {
   const version = get<{ user_version: number }>(db, 'PRAGMA user_version')?.user_version ?? 0;

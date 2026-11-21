@@ -54,6 +54,7 @@ beforeEach(async () => {
   });
   const login = await app.request('/api/login', { method: 'POST', headers: { 'X-MyFood': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 'aaaa-aaaa-aaaa' }) });
   cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+  db.exec("DELETE FROM items WHERE name_key = '__jolly__'"); // login built a state, which made the jolly; these tests insert explicit item ids from 1
 });
 afterEach(() => vi.restoreAllMocks());
 

@@ -175,6 +175,15 @@ export function eventSheet(v: V, sh: Sheet) {
     ${e.kind === 'eat' ? html`<div class="row"><button class="linkbtn" data-a="saveAsPreset">Save as preset</button></div>` : ''}`;
 }
 
+export const eatOutSheet = ({ ui }: V, sh: Sheet) => html`<h2 id="sheet-title">🃏 Eat out</h2>
+  <p class="muted small">An estimate is fine. Nothing is added to the pantry.</p>
+  <label class="field" for="f-eoNote">What did you have?</label>
+  <input id="f-eoNote" type="text" maxlength="80" autofocus placeholder="e.g. Pizza margherita, Gino's" data-f="eoNote" value="${ui.f.eoNote ?? ''}" autocomplete="off">
+  ${field(ui.f, 'eoKcal', 'Calories (kcal)', true)}
+  <div class="row">${[['eoP', 'Protein g'], ['eoF', 'Fat g'], ['eoC', 'Carbs g']].map(([id, label]) => html`<div class="grow">${field(ui.f, id!, label!, true)}</div>`)}</div>
+  <div class="row" style="margin-top:16px">${sh.id ? html`<button class="btn alt" data-a="undoEvent">Undo</button>` : html`<button class="btn alt" data-a="close">Cancel</button>`}
+    <button class="btn right" data-a="saveEatOut" ${ui.online || !sh.id ? '' : 'disabled'}>Save</button></div>`;
+
 export function expenseSheet({ st, ui }: V, _sh: Sheet) {
   return html`<h2 id="sheet-title">Log expense</h2>
     <label class="field" for="f-expCost">Amount (${currencySymbol(st.currency)})</label>

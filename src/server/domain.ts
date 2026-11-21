@@ -1,7 +1,7 @@
 import { computeStock } from '../shared/stock.ts';
 import type { EventBody, MeBody, SettingsBody, Unit } from '../shared/types.ts';
 import type { Db } from './db.ts';
-import { all, bumpRev, get, run, setMeta, transaction } from './db.ts';
+import { JOLLY_KEY, all, bumpRev, get, run, setMeta, transaction } from './db.ts';
 
 /** An error the routes turn into `{ error }` with this status. */
 export function fail(status: 400 | 401 | 403 | 404 | 409 | 429, message: string): never {
@@ -19,9 +19,15 @@ export function allStock(db: Db): Map<number, number> {
   );
 }
 
-/** Unit of an item that can be used (exists and is not archived). */
-export const unitOf = (db: Db, id: number): Unit | undefined =>
-  get<{ unit: Unit }>(db, 'SELECT unit FROM items WHERE id = ? AND archived_at IS NULL', id)?.unit;
+/** Unit of an item that can be used (exists and is not archived). The archived jolly counts too, but only for an `eat` line. */
+export const unitOf = (db: Db, id: number, kind?: EventBody['kind']): Unit | undefined =>
+  get<{ unit: Unit }>(
+    db,
+    "SELECT unit FROM items WHERE id = ? AND (archived_at IS NULL OR (? = 'eat' AND name_key = ?))",
+    id,
+    kind ?? null,
+    JOLLY_KEY,
+  )?.unit;
 
 export function patchMe(db: Db, userId: number, b: MeBody): void {
   transaction(db, () => {

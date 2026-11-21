@@ -190,7 +190,7 @@ export function registerItemTools(server: McpServer, { db, now, lookupBarcode }:
     {
       title: 'Batch Create / Update / Archive Items',
       description:
-        'Create, update, and archive many items in one atomic call (all succeed or nothing changes). Runs all creates, then all updates, then all archives, so one batch cannot create a name that a later update or archive in the same batch frees up (split those into two calls). Use this instead of repeated create_item/update_item/archive_item calls.',
+        'Create, update, and archive many items in one atomic call (all succeed or nothing changes). Runs all creates, then all updates, then all archives, so one batch cannot create a name that a later update or archive in the same batch frees up (split those into two calls). Use this instead of repeated create_item/update_item/archive_item calls. For restaurant/takeaway food use log_eat_out instead of creating items.',
       inputSchema: {
         create: z.array(CreateItemArgs).max(100).optional().describe('Items to create (same fields as create_item)'),
         update: z.array(UpdateItemArgs).max(100).optional().describe('Item patches (same fields as update_item, item_id required)'),
@@ -226,7 +226,7 @@ export function registerItemTools(server: McpServer, { db, now, lookupBarcode }:
     'create_item',
     {
       title: 'Create Item',
-      description: 'Create a new pantry or meal item (or revive a matching archived item). To create several, use batch_items.',
+      description: 'Create a new pantry or meal item (or revive a matching archived item). To create several, use batch_items. For restaurant/takeaway food use log_eat_out instead.',
       inputSchema: createItemShape,
       annotations: WRITE_ANNOTATIONS,
     },
