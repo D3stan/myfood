@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Keeps the SHA pins in workflows fresh; npm bumps are left to manual review.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
