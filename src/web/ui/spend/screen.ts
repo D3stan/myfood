@@ -44,7 +44,7 @@ export function spend(v: V, now: number | Date = new Date()) {
     ${frameBar('spend', fr.frame, fr.offset, range.label, nav.canPrev, nav.partial && !wide.data && !wide.loading, wide.loading)}
     <div class="card" id="spend-summary">
       <div class="row" style="align-items:center"><span class="small muted grow">Household paid</span><span id="spend-total" style="font-family:'Permanent Marker',cursive;font-size:1.6rem">${fmtCost(total, st.currency)}</span></div>
-      ${barChart({ bars, fmt: c => fmtCost(c, st.currency) })}
+      ${fr.frame === 'day' ? '' : barChart({ bars, fmt: c => fmtCost(c, st.currency) })}
       <div class="row small muted" style="gap:10px;flex-wrap:wrap;margin:6px 0">
         ${st.users.map((u, i) => html`<span><i style="display:inline-block;width:10px;height:10px;border:1px solid var(--ink);background:${COLORS[i % COLORS.length]!}"></i> ${u.emoji} ${u.name}</span>`)}
       </div>

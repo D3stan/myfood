@@ -42,6 +42,17 @@ describe('periodRange', () => {
   });
 });
 
+describe('Day frame', () => {
+  const now = new Date(2026, 10, 20); // Fri 20 Nov 2026
+  test('periodRange: one day, offset steps back', () => {
+    const d = periodRange('day', 0, now);
+    expect(d).toMatchObject({ from: '2026-11-20', to: '2026-11-20', label: 'Fri 20 Nov', days: ['2026-11-20'] });
+    expect(periodRange('day', -1, now).label).toBe('Thu 19 Nov');
+    expect(needsStats('day', periodRange('day', -100, now), now)).toBe(true);
+    expect(needsStats('day', d, now)).toBe(false);
+  });
+});
+
 describe('Year frame', () => {
   test('range is Jan 1..Dec 31 with the year as label, offsets move whole years, leap years have 366 days', () => {
     const y = periodRange('year', 0, new Date(2026, 10, 17));
@@ -129,7 +140,7 @@ describe('Stats beyond the window', () => {
     await vi.waitFor(() => expect(view()).not.toContain('Loading…'));
     expect(fetchMock).toHaveBeenCalledWith(`/api/stats/nutrition?from=${p.from}&to=${p.to}`, expect.anything());
     expect(view()).toContain('1 of 7 days logged');
-    expect(view().match(/<rect/g)).toHaveLength(1);
+    expect(view().match(/<rect/g)).toHaveLength(3);
     // stepping forward fetches that neighbour once; coming back to the first is a cache hit
     actions.frameStep!(el({ k: 'me', d: '1' }));
     actions.frameStep!(el({ k: 'me', d: '-1' }));
@@ -216,9 +227,21 @@ describe('Me trend', () => {
     expect(week).toContain('id="me-frame-week"');
     expect(week).toContain('class="goal"');
     expect(week).toContain('1 of ');
-    expect(week.match(/<rect/g)).toHaveLength(1);
+    expect(week.match(/<rect/g)).toHaveLength(3);
     s.ui.frames.me = { frame: 'month', offset: 0 };
     expect(appHtml(s)).toContain('role="img"');
+  });
+  test('week chart stacks P/F/C kcal per day; day frame shows that day as macro lines', () => {
+    const s = newStore(structuredClone(fixture));
+    s.server!.daily_nutrition = [row(today, 1500)];
+    s.ui.tab = 'me';
+    expect(appHtml(s).match(/<rect/g)).toHaveLength(3); // 200 + 270 + 400 kcal
+    s.ui.frames.me = { frame: 'day', offset: 0 };
+    const day = appHtml(s);
+    expect(day).toContain('id="me-frame-day"');
+    expect(day).toContain('Calories');
+    expect(day).not.toContain('<svg class="chart"');
+    expect(day).not.toContain('days logged');
   });
   test('only my rows feed the trend', () => {
     expect(html([row(today, 1500, 100, 2)])).toContain('0 of ');

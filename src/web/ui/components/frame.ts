@@ -1,4 +1,4 @@
-// Week/Month/Year selector with ‹ label ›. State lives in ui.frames[key]; actions are in ../frame-actions.ts.
+// Day/Week/Month/Year selector with ‹ label ›. State lives in ui.frames[key]; actions are in ../frame-actions.ts.
 import type { Frame } from '../../../shared/period.ts';
 import { html } from '../../html.ts';
 import type { Ui } from '../../store.ts';
@@ -10,7 +10,7 @@ export function frameBar(key: string, frame: Frame, offset: number, label: strin
   const seg = (f: Frame, text: string) => html`<button id="${key}-frame-${f}" class="${frame === f ? 'on' : ''}" data-a="frame" data-k="${key}" data-v="${f}">${text}</button>`;
   return html`
     <div class="row wrap" style="margin:0 0 8px">
-      <div class="seg" style="margin:0" role="group" aria-label="Time frame">${seg('week', 'Week')}${seg('month', 'Month')}${seg('year', 'Year')}</div>
+      <div class="seg" style="margin:0" role="group" aria-label="Time frame">${seg('day', 'Day')}${seg('week', 'Week')}${seg('month', 'Month')}${seg('year', 'Year')}</div>
       <div class="row right" style="gap:4px">
         <button id="${key}-prev" class="btn alt icon" data-a="frameStep" data-k="${key}" data-d="-1" aria-label="Previous" ${canPrev ? '' : 'disabled'}>‹</button>
         <span style="min-width:90px;text-align:center">${label}</span>
