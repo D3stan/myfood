@@ -78,12 +78,8 @@ jobs:
       - name: Trigger Dokploy deploy webhook
         env:
           DOKPLOY_WEBHOOK_URL: ${{ secrets.DOKPLOY_WEBHOOK_URL }}
-          MSG: ${{ github.event.head_commit.message }}
         run: |
-          # Mimic a GitHub push payload: Dokploy reads ref and commits from it.
-          body=$(jq -nc --arg msg "$MSG" \
-            '{ref:"refs/heads/main", head_commit:{message:$msg}, commits:[{message:$msg, added:[], modified:[], removed:[]}]}')
-          code=$(curl -sS -o resp.txt -w '%{http_code}' --retry 3 -X POST "$DOKPLOY_WEBHOOK_URL" \
-            -H 'Content-Type: application/json' -H 'X-GitHub-Event: push' -d "$body")
-          echo "HTTP $code"; cat resp.txt
-          [ "$code" -lt 300 ]
+          curl -fsS --retry 3 -X POST "$DOKPLOY_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -H 'X-GitHub-Event: push' \
+            -d '{"ref":"refs/heads/main"}'
